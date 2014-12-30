@@ -5,14 +5,20 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
 	"github.com/maxwellhealth/bongo"
-	"io"
-	// "log"
 	"labix.org/v2/mgo/bson"
+	// "github.com/oleiade/reflections"
+	"io"
+	// "labix.org/v2/mgo/bson"
+	"errors"
+	"log"
 	"net/http"
-	"net/url"
-	"strconv"
+	// "net/url"
+	// "reflect"
+	// "strconv"
+	"reflect"
 	"strings"
-	"time"
+	// "time"
+	// "fmt"
 )
 
 type SortConfig struct {
@@ -25,33 +31,92 @@ type PaginationConfig struct {
 	Sort    []SortConfig
 }
 
-type queryFilter interface {
-	Run(*http.Request, *url.Values) error
+type QueryFilter func(*http.Request, bson.M) (error, int)
+type DocumentFilter func(*http.Request, interface{}) (error, int)
+type ListResponseFilter func(*http.Request, *HTTPListResponse) (error, int)
+type SingleResponseFilter func(*http.Request, *HTTPSingleResponse) (error, int)
+
+type HTTPListResponse struct {
+	Pagination *bongo.PaginationInfo `json:"pagination"`
+	Data       []interface{}         `json:"data"`
 }
 
-type documentFilter interface {
-	Run(*http.Request, interface{}) error
+type HTTPSingleResponse struct {
+	Data interface{} `json:"data"`
 }
 
-type responseFilter interface {
-	Run(*http.Request, map[string]interface{}) error
+type HTTPErrorResponse struct {
+	Error error `json:"error"`
+}
+
+func NewErrorResponse(err error) *HTTPErrorResponse {
+	return &HTTPErrorResponse{err}
+}
+
+func (e *HTTPErrorResponse) ToJSON() string {
+
+	if reflect.TypeOf(e.Error).String() != "*bongo.SaveResult" {
+		m := make(map[string]string)
+		m["error"] = e.Error.Error()
+		marshaled, _ := json.Marshal(m)
+		return string(marshaled)
+	} else {
+		marshaled, _ := json.Marshal(e)
+		return string(marshaled)
+	}
+
 }
 
 type modelFactory interface {
 	New() interface{}
 }
 
+type PreFindFilters struct {
+	ReadOne  []QueryFilter
+	ReadList []QueryFilter
+	Update   []QueryFilter
+	Delete   []QueryFilter
+}
+
+type PreSaveFilters struct {
+	Create []DocumentFilter
+	Update []DocumentFilter
+	Delete []DocumentFilter
+}
+
+type PostRetrieveFilters struct {
+	Update []DocumentFilter
+	Delete []DocumentFilter
+}
+
+type PreResponseFilters struct {
+	ReadOne  []SingleResponseFilter
+	ReadList []ListResponseFilter
+	Create   []SingleResponseFilter
+	Update   []SingleResponseFilter
+	Delete   []SingleResponseFilter
+}
+
+type Middleware struct {
+	ReadOne  alice.Chain
+	ReadList alice.Chain
+	Create   alice.Chain
+	Update   alice.Chain
+	Delete   alice.Chain
+}
+
 type Endpoint struct {
-	Collection        *bongo.Collection
-	Uri               string
-	QueryParams       []string
-	Pagination        *PaginationConfig
-	PreFilterHooks    map[string][]queryFilter
-	PreSaveHooks      map[string][]documentFilter
-	PostRetrieveHooks map[string][]documentFilter
-	PreResponseHooks  map[string][]responseFilter
-	Factory           modelFactory
-	Middleware        map[string]alice.Chain
+	Collection          *bongo.Collection
+	Uri                 string
+	QueryParams         []string
+	Pagination          *PaginationConfig
+	PreFindFilters      *PreFindFilters
+	PreSaveFilters      *PreSaveFilters
+	PostRetrieveFilters *PostRetrieveFilters
+	PreResponseFilters  *PreResponseFilters
+	Factory             modelFactory
+	Middleware          *Middleware
+	AllowFullQuery      bool
 }
 
 func NewEndpoint(uri string, collection *bongo.Collection) *Endpoint {
@@ -59,199 +124,132 @@ func NewEndpoint(uri string, collection *bongo.Collection) *Endpoint {
 	endpoint.Uri = uri
 	endpoint.Collection = collection
 	endpoint.Pagination = &PaginationConfig{}
-	methods := []string{"create", "update", "readOne", "readList", "delete"}
 
-	endpoint.PreFilterHooks = make(map[string][]queryFilter)
-	endpoint.PreSaveHooks = make(map[string][]documentFilter)
-	endpoint.PostRetrieveHooks = make(map[string][]documentFilter)
-	endpoint.PreResponseHooks = make(map[string][]responseFilter)
-	endpoint.Middleware = make(map[string]alice.Chain)
-	for _, m := range methods {
-		endpoint.PreFilterHooks[m] = make([]queryFilter, 0)
-		endpoint.PreSaveHooks[m] = make([]documentFilter, 0)
-		endpoint.PostRetrieveHooks[m] = make([]documentFilter, 0)
-		endpoint.PreResponseHooks[m] = make([]responseFilter, 0)
-		endpoint.Middleware[m] = alice.Chain{}
-	}
+	endpoint.Middleware = new(Middleware)
+	endpoint.PreFindFilters = new(PreFindFilters)
+	endpoint.PreSaveFilters = new(PreSaveFilters)
+	endpoint.PostRetrieveFilters = new(PostRetrieveFilters)
+	endpoint.PreResponseFilters = new(PreResponseFilters)
 
 	return endpoint
 }
 
+// func (e *Endpoint) PreFind(method string, filter QueryFilter) *Endpoint {
+// 	methods := methodsFromMethod(method)
+// 	for _, m := range methods {
+// 		e.PreFilterHooks[m] = append(e.PreFilterHooks[m], hook)
+// 	}
+
+// 	return e
+
+// }
+
+// func (e *Endpoint) PreSave(method string, hook documentFilter) *Endpoint {
+// 	methods := methodsFromMethod(method)
+// 	for _, m := range methods {
+// 		e.PreSaveHooks[m] = append(e.PreSaveHooks[m], hook)
+// 	}
+// 	return e
+// }
+
+// func (e *Endpoint) PostRetrieve(method string, hook documentFilter) *Endpoint {
+// 	methods := methodsFromMethod(method)
+// 	for _, m := range methods {
+// 		e.PostRetrieveHooks[m] = append(e.PostRetrieveHooks[m], hook)
+// 	}
+
+// 	return e
+// }
+
+// func (e *Endpoint) PreResponse(method string, hook responseFilter) *Endpoint {
+// 	methods := methodsFromMethod(method)
+// 	for _, m := range methods {
+// 		e.PreResponseHooks[m] = append(e.PreResponseHooks[m], hook)
+// 	}
+// 	return e
+// }
+
 func methodsFromMethod(method string) []string {
-	var methods []string
 	if method == "*" || method == "all" {
-		methods = []string{"create", "update", "readOne", "readList", "delete"}
+		return []string{"ReadOne", "ReadList", "Create", "Update", "Delete"}
 	} else if method == "write" {
-		methods = []string{"create", "update", "delete"}
+		return []string{"Create", "Update", "Delete"}
 	} else if method == "read" {
-		methods = []string{"readOne", "readList"}
+		return []string{"ReadOne", "ReadList"}
 	} else {
-		methods = []string{method}
+		return []string{method}
 	}
-	return methods
-}
-
-func (e *Endpoint) PreFilter(method string, hook queryFilter) *Endpoint {
-	methods := methodsFromMethod(method)
-	for _, m := range methods {
-		e.PreFilterHooks[m] = append(e.PreFilterHooks[m], hook)
-	}
-
-	return e
-
-}
-
-func (e *Endpoint) PreSave(method string, hook documentFilter) *Endpoint {
-	methods := methodsFromMethod(method)
-	for _, m := range methods {
-		e.PreSaveHooks[m] = append(e.PreSaveHooks[m], hook)
-	}
-	return e
-}
-
-func (e *Endpoint) PostRetrieve(method string, hook documentFilter) *Endpoint {
-	methods := methodsFromMethod(method)
-	for _, m := range methods {
-		e.PostRetrieveHooks[m] = append(e.PostRetrieveHooks[m], hook)
-	}
-
-	return e
-}
-
-func (e *Endpoint) PreResponse(method string, hook responseFilter) *Endpoint {
-	methods := methodsFromMethod(method)
-	for _, m := range methods {
-		e.PreResponseHooks[m] = append(e.PreResponseHooks[m], hook)
-	}
-	return e
 }
 
 func (e *Endpoint) SetMiddleware(method string, chain alice.Chain) *Endpoint {
 	methods := methodsFromMethod(method)
 	for _, m := range methods {
-		e.Middleware[m] = chain
+		switch m {
+		case "ReadOne":
+			e.Middleware.ReadOne = chain
+		case "ReadList":
+			e.Middleware.ReadList = chain
+		case "Create":
+			e.Middleware.Create = chain
+		case "Update":
+			e.Middleware.Update = chain
+		case "Delete":
+			e.Middleware.Delete = chain
+		}
 	}
 	return e
 }
 
-func (e *Endpoint) getRouter() *mux.Router {
+// Get the mux router that can be plugged in as an http handler.
+// Gives more flexibility than just using the Register() method which
+// registers the router directly on the http root handler.
+// Use this is you want to use a subroute, a custom http.Server instance, etc
+func (e *Endpoint) GetRouter() *mux.Router {
 	r := mux.NewRouter()
-	r.Handle(e.Uri, e.Middleware["readList"].ThenFunc(e.HandleReadList)).Methods("GET")
-	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware["readOne"].ThenFunc(e.HandleReadOne)).Methods("GET")
-	r.Handle(e.Uri, e.Middleware["create"].ThenFunc(e.HandleCreate)).Methods("POST")
-	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware["update"].ThenFunc(e.HandleUpdate)).Methods("PUT")
-	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware["delete"].ThenFunc(e.HandleUpdate)).Methods("DELETE")
+	r.Handle(e.Uri, e.Middleware.ReadList.ThenFunc(e.HandleReadList)).Methods("GET")
+	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.ReadOne.ThenFunc(e.HandleReadOne)).Methods("GET")
+	r.Handle(e.Uri, e.Middleware.Create.ThenFunc(e.HandleCreate)).Methods("POST")
+	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Update.ThenFunc(e.HandleUpdate)).Methods("PUT")
+	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Delete.ThenFunc(e.HandleDelete)).Methods("DELETE")
 	return r
 }
 
+// Register the endpoint to the http root handler. Use GetRouter() for more flexibility
 func (e *Endpoint) Register() {
 	// Make a new router
-	r := e.getRouter()
+	r := e.GetRouter()
 	http.Handle("/", r)
 }
 
-func addIntToQuery(query *bson.M, modifier string, value string) {
-	withoutPrefix := strings.TrimPrefix(param, strings.join([]string{modifier, "_"}, ""))
+// Handle a "ReadList" request, including parsing pagination, query string, etc
+func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 
-	parsed, err := strconv.Atoi(value)
-	if err == nil {
-		sub := &bson.M{}
-		sub[modifier] = parsed
-		ret[withoutPrefix] = sub
-	}
-}
+	// Get the query
+	query, err := e.getQuery(req)
 
-func addDateToQuery(query *bson.M, modifier string, value string) {
-
-	withoutPrefix := strings.TrimPrefix(param, strings.join([]string{modifier, "_"}, ""))
-
-	// Remove date from modifier
-	parsed, err := strconv.Atoi(value)
-	if err == nil {
-		t := time.Unix(parsed)
-		sub := &bson.M{}
-		sub[modifier] = t
-		ret[withoutPrefix] = sub
-	}
-}
-
-func propertyIsType(obj interface{}, prop string, t string) bool {
-	objValue := reflectValue(obj)
-	field := objValue.FieldByName(prop)
-	if !field.IsValid() {
-		log.Fatal("No such field: %s in obj", name)
-		return false
+	if err != nil {
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
+		return
 	}
 
-	name := field.Type().Name()
-
-	if name == t {
-		return true
-	}
-
-	return false
-}
-
-func addDateOrIntToQuery(instance interface{}, query *bson.M, modifier string, value string) {
-	withoutPrefix := strings.TrimPrefix(param, "$lt_")
-	if propertyIsType(instance, withoutPrefix, "Time") {
-		addDateToQuery(query, modifier, value)
-	} else {
-		addIntToQuery(query, modifier, value)
-	}
-}
-
-func reflectValue(obj interface{}) reflect.Value {
-	var val reflect.Value
-
-	if reflect.TypeOf(obj).Kind() == reflect.Ptr {
-		val = reflect.ValueOf(obj).Elem()
-	} else {
-		val = reflect.ValueOf(obj)
-	}
-
-	return val
-}
-
-func (e *Endpoint) getQuery(req *http.Request) *bson.M {
-	ret := &bson.M{}
-	query := req.URL.Query()
-
-	// Get an instance so we can inspect it with reflection
-	instance := e.Factory.New()
-
-	var withoutPrefix string
-
-	for _, param := range e.QueryParams {
-		val := query.Get(param)
-
-		if len(val) > 0 {
-
-			if strings.HasPrefix(param, "$lt_") {
-				addDateOrIntToQuery(instance, query, "$lt", val)
-			} else if strings.HasPrefix(param, "$gt_") {
-				addDateOrIntToQuery(instance, query, "$gt", val)
-			} else if strings.HasPrefix(param, "$gte_") {
-				addDateOrIntToQuery(instance, query, "$gte", val)
-			} else if strings.HasPrefix(param, "$lte_") {
-				addDateOrIntToQuery(instance, query, "$lte", val)
-			} else if strings.HasPrefix(param, "$ltdate_") {
-				addDateOrIntToQuery(instance, query, "$ltdate", val)
-			} else if strings.HasPrefix(param, "$gtdate_") {
-				addDateOrIntToQuery(instance, query, "$gtdate", val)
-			} else if strings.HasPrefix(param, "$gtedate_") {
-				addDateOrIntToQuery(instance, query, "$gtedate", val)
-			} else if strings.HasPrefix(param, "$ltedate_") {
-				addDateOrIntToQuery(instance, query, "$ltedate", val)
-			}
+	// Run pre filters for readList
+	var code int
+	for _, f := range e.PreFindFilters.ReadList {
+		err, code = f(req, query)
+		if err != nil {
+			break
 		}
 	}
 
-	return query
-}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
 
-func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
-	results := e.Collection.Find(nil)
+	results := e.Collection.Find(query)
 
 	// Default pagination is 50
 	if e.Pagination.PerPage == 0 {
@@ -274,26 +272,340 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	marshaled, err := json.Marshal(response)
+	httpResponse := &HTTPListResponse{pageInfo, response}
+
+	// Filters can modify the response and optionally return a non-nil error, in which case the server's response will be a new
+	// HTTP error with the provided error code. Code defaults to 500 if zero (not set)
+	for _, f := range e.PreResponseFilters.ReadList {
+		err, code = f(req, httpResponse)
+		if err != nil {
+			break
+		}
+	}
+
 	if err != nil {
-		panic(err)
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	marshaled, err := json.Marshal(httpResponse)
+	if err != nil {
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusInternalServerError)
+		return
 	}
 
 	io.WriteString(w, string(marshaled))
 }
 
 func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
-	io.WriteString(w, "hello, world!\n")
+	// Step 1 - make sure provided ID is a valid mongo id hex
+	vars := mux.Vars(req)
+
+	id := vars["id"]
+
+	if len(id) == 0 || !bson.IsObjectIdHex(id) {
+		http.Error(w, "Invalid object ID", http.StatusBadRequest)
+		return
+	}
+
+	query := bson.M{
+		"_id": bson.ObjectIdHex(id),
+	}
+
+	// Run it through the filters
+	var err error
+	var code int
+	for _, f := range e.PreFindFilters.ReadOne {
+		err, code = f(req, query)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	// Execute the find
+	instance := e.Factory.New()
+
+	// Use a FindOne instead of FindById since the query filters may need
+	// to add additional parameters to the search query, aside from just ID.
+	// Error here is just if there is no document
+	err = e.Collection.FindOne(query, instance)
+
+	if err != nil {
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
+		return
+	}
+
+	httpResponse := &HTTPSingleResponse{instance}
+
+	// Run pre response filters
+	for _, f := range e.PreResponseFilters.ReadOne {
+		err, code = f(req, httpResponse)
+		if err != nil {
+			break
+		}
+	}
+
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	marshaled, err := json.Marshal(httpResponse)
+	if err != nil {
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusInternalServerError)
+		return
+	}
+
+	io.WriteString(w, string(marshaled))
+
 }
 
 func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
-	io.WriteString(w, "hello, world!\n")
+	decoder := json.NewDecoder(req.Body)
+
+	obj := e.Factory.New()
+
+	err := decoder.Decode(obj)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Run pre save filters
+	var code int
+	for _, f := range e.PreSaveFilters.Create {
+		err, code = f(req, obj)
+		if err != nil {
+			break
+		}
+	}
+
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	result := e.Collection.Save(obj)
+
+	if result.Success == false {
+		// Make a new JSON e
+		http.Error(w, NewErrorResponse(result).ToJSON(), http.StatusBadRequest)
+		return
+	}
+
+	httpResponse := &HTTPSingleResponse{obj}
+
+	// Run pre response filters
+	for _, f := range e.PreResponseFilters.ReadOne {
+		err, code = f(req, httpResponse)
+		if err != nil {
+			break
+		}
+	}
+
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	marshaled, _ := json.Marshal(httpResponse)
+
+	io.WriteString(w, string(marshaled))
 }
 
 func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
-	io.WriteString(w, "hello, world!\n")
+	decoder := json.NewDecoder(req.Body)
+
+	vars := mux.Vars(req)
+
+	id := vars["id"]
+
+	if len(id) == 0 || !bson.IsObjectIdHex(id) {
+		http.Error(w, NewErrorResponse(errors.New("Invalid object ID")).ToJSON(), http.StatusBadRequest)
+		return
+	}
+
+	query := bson.M{
+		"_id": bson.ObjectIdHex(id),
+	}
+
+	// Run it through the filters
+	var err error
+	var code int
+	for _, f := range e.PreFindFilters.Update {
+		err, code = f(req, query)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	// Execute the find
+	instance := e.Factory.New()
+
+	// Use a FindOne instead of FindById since the query filters may need
+	// to add additional parameters to the search query, aside from just ID.
+	// Error here is just if there is no document
+	//
+	err = e.Collection.FindOne(query, instance)
+	if err != nil {
+		log.Println("Not found from here")
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
+		return
+	}
+
+	err = decoder.Decode(instance)
+	if err != nil {
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
+		return
+	}
+
+	// Run pre save filters
+	for _, f := range e.PreSaveFilters.Update {
+		err, code = f(req, instance)
+		if err != nil {
+			break
+		}
+	}
+
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	result := e.Collection.Save(instance)
+
+	if result.Success == false {
+		// Make a new JSON e
+		http.Error(w, NewErrorResponse(result).ToJSON(), http.StatusBadRequest)
+		return
+	}
+
+	httpResponse := &HTTPSingleResponse{instance}
+
+	// Run pre response filters
+	for _, f := range e.PreResponseFilters.Update {
+		err, code = f(req, httpResponse)
+		if err != nil {
+			break
+		}
+	}
+
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	marshaled, _ := json.Marshal(httpResponse)
+
+	io.WriteString(w, string(marshaled))
 }
 
 func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
-	io.WriteString(w, "hello, world!\n")
+
+	vars := mux.Vars(req)
+
+	id := vars["id"]
+
+	if len(id) == 0 || !bson.IsObjectIdHex(id) {
+		http.Error(w, NewErrorResponse(errors.New("Invalid object ID")).ToJSON(), http.StatusBadRequest)
+		return
+	}
+
+	query := bson.M{
+		"_id": bson.ObjectIdHex(id),
+	}
+
+	// Run it through the filters
+	var err error
+	var code int
+	for _, f := range e.PreFindFilters.Update {
+		err, code = f(req, query)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	// Execute the find
+	instance := e.Factory.New()
+
+	// Use a FindOne instead of FindById since the query filters may need
+	// to add additional parameters to the search query, aside from just ID.
+	// Error here is just if there is no document
+	//
+	err = e.Collection.FindOne(query, instance)
+	if err != nil {
+		log.Println("Not found from here")
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
+		return
+	}
+
+	if err != nil {
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
+		return
+	}
+
+	// Run pre save filters
+	for _, f := range e.PreSaveFilters.Update {
+		err, code = f(req, instance)
+		if err != nil {
+			break
+		}
+	}
+
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
+	err = e.Collection.Delete(instance)
+
+	if err != nil {
+		// Make a new JSON e
+		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
+		return
+	}
+
+	io.WriteString(w, "OK")
 }

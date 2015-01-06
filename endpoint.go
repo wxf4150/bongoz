@@ -12,13 +12,15 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 	// "net/url"
 	// "reflect"
 	// "strconv"
 	"reflect"
+	"strconv"
 	"strings"
 	// "time"
-	// "fmt"
+	"fmt"
 )
 
 type SortConfig struct {
@@ -221,9 +223,36 @@ func (e *Endpoint) Register() {
 	http.Handle("/", r)
 }
 
+func handleError(w http.ResponseWriter) {
+	var err error
+	if r := recover(); r != nil {
+		// panic(r)
+		// return
+		if e, ok := r.(error); ok {
+			if e.Error() == "EOF" {
+				err = errors.New("Lost database connection unexpectedly")
+			} else {
+				err = e
+			}
+
+		} else if e, ok := r.(string); ok {
+			log.Println("error is string")
+			err = errors.New(e)
+		} else {
+			log.Println("Making sprintf", r)
+			err = errors.New(fmt.Sprint(r))
+		}
+
+		http.Error(w, NewErrorResponse(err).ToJSON(), 500)
+
+	}
+}
+
 // Handle a "ReadList" request, including parsing pagination, query string, etc
 func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
-
+	defer handleError(w)
+	w.Header().Set("Content-Type", "application/json")
+	start := time.Now()
 	// Get the query
 	query, err := e.getQuery(req)
 
@@ -255,10 +284,41 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	if e.Pagination.PerPage == 0 {
 		e.Pagination.PerPage = 50
 	}
-	pageInfo, err := results.Paginate(e.Pagination.PerPage, 1)
+
+	perPage := e.Pagination.PerPage
+	page := 1
+
+	// Allow override with query vars
+	perPageParam := req.URL.Query().Get("_perPage")
+	pageParam := req.URL.Query().Get("_page")
+
+	if len(perPageParam) > 0 {
+		converted, err := strconv.Atoi(perPageParam)
+		// Hard limit to 500 so people can break it
+		if err == nil && converted > 0 && converted < 500 {
+			perPage = converted
+		}
+	}
+
+	if len(pageParam) > 0 {
+		converted, err := strconv.Atoi(pageParam)
+
+		if err == nil && converted >= 1 {
+			page = converted
+		}
+	}
+
+	pageInfo, err := results.Paginate(perPage, page)
 
 	if err != nil {
 		panic(err)
+	}
+
+	sortParam := req.URL.Query().Get("_sort")
+
+	if len(sortParam) > 0 {
+		sortFields := strings.Split(sortParam, ",")
+		results.Query.Sort(sortFields...)
 	}
 	response := make([]interface{}, 0)
 
@@ -292,15 +352,22 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	marshaled, err := json.Marshal(httpResponse)
+
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusInternalServerError)
 		return
 	}
 
 	io.WriteString(w, string(marshaled))
+
+	elapsed := time.Since(start)
+	log.Printf("Request took %s", elapsed)
 }
 
 func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
+	defer handleError(w)
+	w.Header().Set("Content-Type", "application/json")
+	start := time.Now()
 	// Step 1 - make sure provided ID is a valid mongo id hex
 	vars := mux.Vars(req)
 
@@ -370,10 +437,15 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	}
 
 	io.WriteString(w, string(marshaled))
+	elapsed := time.Since(start)
+	log.Printf("Request took %s", elapsed)
 
 }
 
 func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
+	defer handleError(w)
+	w.Header().Set("Content-Type", "application/json")
+	start := time.Now()
 	decoder := json.NewDecoder(req.Body)
 
 	obj := e.Factory.New()
@@ -430,9 +502,14 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 	marshaled, _ := json.Marshal(httpResponse)
 
 	io.WriteString(w, string(marshaled))
+	elapsed := time.Since(start)
+	log.Printf("Request took %s", elapsed)
 }
 
 func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
+	defer handleError(w)
+	w.Header().Set("Content-Type", "application/json")
+	start := time.Now()
 	decoder := json.NewDecoder(req.Body)
 
 	vars := mux.Vars(req)
@@ -530,9 +607,15 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	marshaled, _ := json.Marshal(httpResponse)
 
 	io.WriteString(w, string(marshaled))
+	elapsed := time.Since(start)
+	log.Printf("Request took %s", elapsed)
 }
 
 func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
+	defer handleError(w)
+
+	w.Header().Set("Content-Type", "application/json")
+	start := time.Now()
 
 	vars := mux.Vars(req)
 
@@ -573,7 +656,6 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	//
 	err = e.Collection.FindOne(query, instance)
 	if err != nil {
-		log.Println("Not found from here")
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
 		return
 	}
@@ -608,4 +690,6 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	}
 
 	io.WriteString(w, "OK")
+	elapsed := time.Since(start)
+	log.Printf("Request took %s", elapsed)
 }

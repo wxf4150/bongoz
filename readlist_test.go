@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"labix.org/v2/mgo/bson"
-	// "log"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	// "net/url"
@@ -40,14 +40,17 @@ func (s *TestSuite) TestReadList(c *C) {
 		Content: "bar",
 	}
 
-	collection.Save(obj1)
-	collection.Save(obj2)
+	res := collection.Save(obj1)
+	c.Assert(res.Success, Equals, true)
+	res = collection.Save(obj2)
+	c.Assert(res.Success, Equals, true)
 
 	req, _ := http.NewRequest("GET", "/api/pages", nil)
 	router.ServeHTTP(w, req)
 
 	response := &listResponse{}
 
+	log.Println(w.Body.String())
 	err := json.Unmarshal(w.Body.Bytes(), response)
 
 	c.Assert(err, Equals, nil)
@@ -134,7 +137,7 @@ func (s *TestSuite) TestReadListWithPassingPreFindFilter(c *C) {
 	c.Assert(response.Pagination.RecordsOnPage, Equals, 1)
 	c.Assert(len(response.Data), Equals, 1)
 	// log.Println(response.Data)
-	c.Assert(response.Data[0]["Content"], Equals, "foo")
+	c.Assert(response.Data[0]["content"], Equals, "foo")
 }
 
 func (s *TestSuite) TestReadListWithMultiplePreFindFilters(c *C) {

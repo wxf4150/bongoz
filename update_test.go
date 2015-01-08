@@ -55,8 +55,8 @@ func (s *TestSuite) TestUpdate(c *C) {
 
 	c.Assert(err, Equals, nil)
 
-	c.Assert(response.Data["Content"], Equals, "bar")
-	c.Assert(response.Data["IntValue"], Equals, 5.0)
+	c.Assert(response.Data["content"], Equals, "bar")
+	c.Assert(response.Data["intValue"], Equals, 5.0)
 }
 
 func (s *TestSuite) TestUpdateWithValidationErrors(c *C) {

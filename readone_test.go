@@ -49,7 +49,7 @@ func (s *TestSuite) TestReadOne(c *C) {
 
 	c.Assert(err, Equals, nil)
 
-	c.Assert(response.Data["Content"], Equals, "foo")
+	c.Assert(response.Data["content"], Equals, "foo")
 }
 
 func (s *TestSuite) TestReadOneWithPassingPreFindFilter(c *C) {

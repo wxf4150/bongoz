@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	// "errors"
 	// "labix.org/v2/mgo/bson"
-	"log"
+	// "log"
 	"net/http"
 	"net/http/httptest"
 	// "net/url"
@@ -37,8 +37,6 @@ func (s *TestSuite) TestCreate(c *C) {
 	reader := strings.NewReader(string(marshaled))
 	req, _ := http.NewRequest("POST", "/api/pages", reader)
 	router.ServeHTTP(w, req)
-
-	log.Println(w.Body)
 
 	response := &singleResponse{}
 

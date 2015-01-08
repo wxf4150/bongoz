@@ -39,16 +39,16 @@ type ListResponseFilter func(*http.Request, *HTTPListResponse) (error, int)
 type SingleResponseFilter func(*http.Request, *HTTPSingleResponse) (error, int)
 
 type HTTPListResponse struct {
-	Pagination *bongo.PaginationInfo `json:"pagination"`
-	Data       []interface{}         `json:"data"`
+	Pagination *bongo.PaginationInfo `jsonutils:"pagination"`
+	Data       []interface{}         `jsonutils:"data"`
 }
 
 type HTTPSingleResponse struct {
-	Data interface{} `json:"data"`
+	Data interface{} `jsonutils:"data"`
 }
 
 type HTTPErrorResponse struct {
-	Error error `json:"error"`
+	Error error `jsonutils:"error"`
 }
 
 func NewErrorResponse(err error) *HTTPErrorResponse {
@@ -60,10 +60,10 @@ func (e *HTTPErrorResponse) ToJSON() string {
 	if reflect.TypeOf(e.Error).String() != "*bongo.SaveResult" {
 		m := make(map[string]string)
 		m["error"] = e.Error.Error()
-		marshaled, _ := json.Marshal(m)
+		marshaled, _ := MarshalJSON(m)
 		return string(marshaled)
 	} else {
-		marshaled, _ := json.Marshal(e)
+		marshaled, _ := MarshalJSON(e)
 		return string(marshaled)
 	}
 
@@ -236,10 +236,8 @@ func handleError(w http.ResponseWriter) {
 			}
 
 		} else if e, ok := r.(string); ok {
-			log.Println("error is string")
 			err = errors.New(e)
 		} else {
-			log.Println("Making sprintf", r)
 			err = errors.New(fmt.Sprint(r))
 		}
 
@@ -351,7 +349,7 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	marshaled, err := json.Marshal(httpResponse)
+	marshaled, err := MarshalJSON(httpResponse)
 
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusInternalServerError)
@@ -430,7 +428,7 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	marshaled, err := json.Marshal(httpResponse)
+	marshaled, err := MarshalJSON(httpResponse)
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusInternalServerError)
 		return
@@ -499,8 +497,9 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	marshaled, _ := json.Marshal(httpResponse)
+	marshaled, _ := MarshalJSON(httpResponse)
 
+	log.Println(string(marshaled))
 	io.WriteString(w, string(marshaled))
 	elapsed := time.Since(start)
 	log.Printf("Request took %s", elapsed)
@@ -551,7 +550,6 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	//
 	err = e.Collection.FindOne(query, instance)
 	if err != nil {
-		log.Println("Not found from here")
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
 		return
 	}
@@ -604,7 +602,7 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	marshaled, _ := json.Marshal(httpResponse)
+	marshaled, _ := MarshalJSON(httpResponse)
 
 	io.WriteString(w, string(marshaled))
 	elapsed := time.Since(start)

@@ -49,7 +49,7 @@ type Page struct {
 	DateValue time.Time
 	ArrValue  []string
 	IdArr     []bson.ObjectId
-	IdValue   bson.ObjectId `json:",omitempty" bson:",omitempty"`
+	IdValue   bson.ObjectId `json:",omitempty" bson:"idValue,omitempty"`
 }
 
 var config = &bongo.Config{
@@ -57,7 +57,7 @@ var config = &bongo.Config{
 	Database:         "gotest",
 }
 
-var connection = bongo.Connect(config)
+var connection, _ = bongo.Connect(config)
 var collection = connection.Collection("page")
 
 type Factory struct{}

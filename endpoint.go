@@ -257,7 +257,7 @@ func handleError(w http.ResponseWriter) {
 
 // Handle a "ReadList" request, including parsing pagination, query string, etc
 func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
-	// defer handleError(w)
+	defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
 	var err error
 	var code int

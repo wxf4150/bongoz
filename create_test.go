@@ -40,7 +40,7 @@ func (s *TestSuite) TestCreate(c *C) {
 
 	response := &singleResponse{}
 
-	c.Assert(w.Code, Equals, 200)
+	c.Assert(w.Code, Equals, 201)
 	err = json.Unmarshal(w.Body.Bytes(), response)
 
 	c.Assert(err, Equals, nil)

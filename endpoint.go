@@ -21,6 +21,7 @@ import (
 	"strings"
 	// "time"
 	"fmt"
+	"io/ioutil"
 )
 
 type SortConfig struct {
@@ -37,6 +38,11 @@ type QueryFilter func(*http.Request, bson.M) (error, int)
 type DocumentFilter func(*http.Request, interface{}) (error, int)
 type ListResponseFilter func(*http.Request, *HTTPListResponse) (error, int)
 type SingleResponseFilter func(*http.Request, *HTTPSingleResponse) (error, int)
+type PostWriteResponseHook func(*http.Request, string, interface{})
+type PostReadResponseHook func(*http.Request, string)
+
+// Use this to inspect the request body, for signature-based security, etc
+type PreServeFilter func(*http.Request, []byte) (error, int)
 
 type HTTPListResponse struct {
 	Pagination *bongo.PaginationInfo `jsonutils:"pagination"`
@@ -108,17 +114,20 @@ type Middleware struct {
 }
 
 type Endpoint struct {
-	Collection          *bongo.Collection
-	Uri                 string
-	QueryParams         []string
-	Pagination          *PaginationConfig
-	PreFindFilters      *PreFindFilters
-	PreSaveFilters      *PreSaveFilters
-	PostRetrieveFilters *PostRetrieveFilters
-	PreResponseFilters  *PreResponseFilters
-	Factory             modelFactory
-	Middleware          *Middleware
-	AllowFullQuery      bool
+	Collection             *bongo.Collection
+	Uri                    string
+	QueryParams            []string
+	Pagination             *PaginationConfig
+	PreServeFilters        []PreServeFilter
+	PreFindFilters         *PreFindFilters
+	PreSaveFilters         *PreSaveFilters
+	PostRetrieveFilters    *PostRetrieveFilters
+	PreResponseFilters     *PreResponseFilters
+	PostWriteResponseHooks []PostWriteResponseHook
+	PostReadResponseHooks  []PostReadResponseHook
+	Factory                modelFactory
+	Middleware             *Middleware
+	AllowFullQuery         bool
 }
 
 func NewEndpoint(uri string, collection *bongo.Collection) *Endpoint {
@@ -250,6 +259,24 @@ func handleError(w http.ResponseWriter) {
 func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
+	var err error
+	var code int
+
+	body := []byte{}
+	for _, f := range e.PreServeFilters {
+		err, code = f(req, body)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
 	start := time.Now()
 	// Get the query
 	query, err := e.getQuery(req)
@@ -260,7 +287,6 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run pre filters for readList
-	var code int
 	for _, f := range e.PreFindFilters.ReadList {
 		err, code = f(req, query)
 		if err != nil {
@@ -360,11 +386,35 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 
 	elapsed := time.Since(start)
 	log.Printf("Request took %s", elapsed)
+
+	// Run post response
+	for _, f := range e.PostReadResponseHooks {
+		f(req, "readList")
+	}
 }
 
 func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
+
+	var err error
+	var code int
+	body := []byte{}
+
+	for _, f := range e.PreServeFilters {
+		err, code = f(req, body)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
 	start := time.Now()
 	// Step 1 - make sure provided ID is a valid mongo id hex
 	vars := mux.Vars(req)
@@ -381,8 +431,6 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run it through the filters
-	var err error
-	var code int
 	for _, f := range e.PreFindFilters.ReadOne {
 		err, code = f(req, query)
 		if err != nil {
@@ -438,24 +486,53 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	elapsed := time.Since(start)
 	log.Printf("Request took %s", elapsed)
 
+	// Run post response
+	for _, f := range e.PostReadResponseHooks {
+		f(req, "readOne")
+	}
+
 }
 
 func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
+
+	var err error
+	var code int
+	body, err := ioutil.ReadAll(req.Body)
+
+	for _, f := range e.PreServeFilters {
+		err, code = f(req, body)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
 	start := time.Now()
-	decoder := json.NewDecoder(req.Body)
+
+	// decoder := json.NewDecoder(req.Body)
 
 	obj := e.Factory.New()
 
-	err := decoder.Decode(obj)
+	// Instantiate diff tracker
+	if trackable, ok := obj.(bongo.Trackable); ok {
+		trackable.GetDiffTracker().Reset()
+	}
+
+	err = json.Unmarshal(body, obj)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Run pre save filters
-	var code int
 	for _, f := range e.PreSaveFilters.Create {
 		err, code = f(req, obj)
 		if err != nil {
@@ -499,17 +576,41 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 
 	marshaled, _ := MarshalJSON(httpResponse)
 
-	log.Println(string(marshaled))
 	io.WriteString(w, string(marshaled))
 	elapsed := time.Since(start)
 	log.Printf("Request took %s", elapsed)
+
+	// Run post response
+	go func() {
+		for _, f := range e.PostWriteResponseHooks {
+			f(req, "create", obj)
+		}
+	}()
 }
 
 func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
+
+	var err error
+	var code int
+	body, err := ioutil.ReadAll(req.Body)
+
+	for _, f := range e.PreServeFilters {
+		err, code = f(req, body)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
 	start := time.Now()
-	decoder := json.NewDecoder(req.Body)
 
 	vars := mux.Vars(req)
 
@@ -525,8 +626,6 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run it through the filters
-	var err error
-	var code int
 	for _, f := range e.PreFindFilters.Update {
 		err, code = f(req, query)
 		if err != nil {
@@ -544,6 +643,11 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	// Execute the find
 	instance := e.Factory.New()
 
+	// Instantiate diff tracker
+	if trackable, ok := instance.(bongo.Trackable); ok {
+		trackable.GetDiffTracker().Reset()
+	}
+
 	// Use a FindOne instead of FindById since the query filters may need
 	// to add additional parameters to the search query, aside from just ID.
 	// Error here is just if there is no document
@@ -554,7 +658,11 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	err = decoder.Decode(instance)
+	if trackable, ok := instance.(bongo.Trackable); ok {
+		trackable.GetDiffTracker().Reset()
+	}
+
+	err = json.Unmarshal(body, instance)
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
 		return
@@ -607,10 +715,35 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	io.WriteString(w, string(marshaled))
 	elapsed := time.Since(start)
 	log.Printf("Request took %s", elapsed)
+
+	// Run post response
+	go func() {
+		for _, f := range e.PostWriteResponseHooks {
+			f(req, "update", instance)
+		}
+	}()
 }
 
 func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
+
+	var err error
+	var code int
+	body := []byte{}
+
+	for _, f := range e.PreServeFilters {
+		err, code = f(req, body)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	start := time.Now()
@@ -629,8 +762,6 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run it through the filters
-	var err error
-	var code int
 	for _, f := range e.PreFindFilters.Update {
 		err, code = f(req, query)
 		if err != nil {
@@ -690,4 +821,12 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	io.WriteString(w, "OK")
 	elapsed := time.Since(start)
 	log.Printf("Request took %s", elapsed)
+
+	// Run post response
+	go func() {
+		for _, f := range e.PostWriteResponseHooks {
+			f(req, "delete", instance)
+		}
+	}()
+
 }

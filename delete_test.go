@@ -37,6 +37,7 @@ func (s *TestSuite) TestDelete(c *C) {
 	req, _ := http.NewRequest("DELETE", strings.Join([]string{"/api/pages", obj.Id.Hex()}, "/"), nil)
 	router.ServeHTTP(w, req)
 
+	c.Assert(w.Code, Equals, 200)
 	pagination, _ := endpoint.Collection.Find(nil).Paginate(50, 1)
 
 	c.Assert(pagination.TotalRecords, Equals, 0)

@@ -26,7 +26,7 @@ type listResponse struct {
 func (s *TestSuite) TestReadList(c *C) {
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
@@ -64,7 +64,7 @@ func (s *TestSuite) TestReadList(c *C) {
 
 func (s *TestSuite) TestReadListWithMiddleware(c *C) {
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	endpoint.Middleware.ReadList = alice.New(errorMiddleware)
 
@@ -85,7 +85,7 @@ func (s *TestSuite) TestReadListWithFailingPreFindFilter(c *C) {
 		return errors.New("foo"), 503
 	}
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	endpoint.PreFindFilters = []QueryFilter{filter}
 	router := endpoint.GetRouter()
@@ -105,7 +105,7 @@ func (s *TestSuite) TestReadListWithPassingPreFindFilter(c *C) {
 		return nil, 0
 	}
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	endpoint.PreFindFilters = []QueryFilter{filter}
 	router := endpoint.GetRouter()
@@ -152,7 +152,7 @@ func (s *TestSuite) TestReadListWithMultiplePreFindFilters(c *C) {
 		return nil, 0
 	}
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	endpoint.PreFindFilters = []QueryFilter{filter, filter2}
 	router := endpoint.GetRouter()
@@ -193,7 +193,7 @@ func (s *TestSuite) TestReadListWithFailingPreResponseFilter(c *C) {
 		return errors.New("bar"), 504
 	}
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	endpoint.PreResponseListFilters = []ListResponseFilter{filter}
 	router := endpoint.GetRouter()
@@ -217,7 +217,7 @@ func (s *TestSuite) BenchmarkReadList(c *C) {
 	}
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	for n := 0; n < 50; n++ {
 		obj := &Page{

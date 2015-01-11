@@ -75,9 +75,7 @@ func (e *HTTPErrorResponse) ToJSON() string {
 
 }
 
-type modelFactory interface {
-	New() interface{}
-}
+type ModelFactory func() interface{}
 
 type Middleware struct {
 	ReadOne  alice.Chain
@@ -100,7 +98,7 @@ type Endpoint struct {
 	PreResponseSingleFilters []SingleResponseFilter
 	PostWriteResponseHooks   []PostWriteResponseHook
 	PostReadResponseHooks    []PostReadResponseHook
-	Factory                  modelFactory
+	Factory                  ModelFactory
 	Middleware               *Middleware
 	SoftDelete               bool
 	AllowFullQuery           bool
@@ -231,7 +229,7 @@ func handleError(w http.ResponseWriter) {
 
 // Handle a "ReadList" request, including parsing pagination, query string, etc
 func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
-	defer handleError(w)
+	// defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
 	var err error
 	var code int
@@ -323,7 +321,7 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	// res := e.Factory.New()
 
 	for i := 0; i < pageInfo.RecordsOnPage; i++ {
-		res := e.Factory.New()
+		res := e.Factory()
 		results.Next(res)
 
 		response = append(response, res)
@@ -420,7 +418,7 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Execute the find
-	instance := e.Factory.New()
+	instance := e.Factory()
 
 	// Use a FindOne instead of FindById since the query filters may need
 	// to add additional parameters to the search query, aside from just ID.
@@ -493,7 +491,7 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 
 	// decoder := json.NewDecoder(req.Body)
 
-	obj := e.Factory.New()
+	obj := e.Factory()
 
 	// Instantiate diff tracker
 	if trackable, ok := obj.(bongo.Trackable); ok {
@@ -616,7 +614,7 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Execute the find
-	instance := e.Factory.New()
+	instance := e.Factory()
 
 	// Instantiate diff tracker
 	if trackable, ok := instance.(bongo.Trackable); ok {
@@ -766,7 +764,7 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Execute the find
-	instance := e.Factory.New()
+	instance := e.Factory()
 
 	// Use a FindOne instead of FindById since the query filters may need
 	// to add additional parameters to the search query, aside from just ID.

@@ -21,7 +21,7 @@ import (
 func (s *TestSuite) TestDelete(c *C) {
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
@@ -45,7 +45,7 @@ func (s *TestSuite) TestDelete(c *C) {
 
 func (s *TestSuite) TestSoftDelete(c *C) {
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 	endpoint.SoftDelete = true
 
 	router := endpoint.GetRouter()
@@ -112,7 +112,7 @@ func (s *TestSuite) TestSoftDelete(c *C) {
 // 	}
 
 // 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = &Factory{}
+// 	endpoint.Factory = Factory
 // 	endpoint.PreFindFilters.ReadOne = []QueryFilter{filter}
 
 // 	router := endpoint.GetRouter()
@@ -145,7 +145,7 @@ func (s *TestSuite) TestSoftDelete(c *C) {
 // 	}
 
 // 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = &Factory{}
+// 	endpoint.Factory = Factory
 // 	endpoint.PreFindFilters.ReadOne = []QueryFilter{filter}
 
 // 	router := endpoint.GetRouter()
@@ -179,7 +179,7 @@ func (s *TestSuite) TestSoftDelete(c *C) {
 // 	}
 
 // 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = &Factory{}
+// 	endpoint.Factory = Factory
 // 	endpoint.PreResponseFilters.ReadOne = []SingleResponseFilter{filter}
 
 // 	router := endpoint.GetRouter()

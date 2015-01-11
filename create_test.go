@@ -21,7 +21,7 @@ import (
 func (s *TestSuite) TestCreate(c *C) {
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &validFactory{}
+	endpoint.Factory = Factory
 
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func (s *TestSuite) TestCreate(c *C) {
 func (s *TestSuite) TestCreateWithValidationErrors(c *C) {
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &validFactory{}
+	endpoint.Factory = ValidFactory
 
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
@@ -80,7 +80,7 @@ func (s *TestSuite) TestCreateWithValidationErrors(c *C) {
 // 	}
 
 // 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = &Factory{}
+// 	endpoint.Factory = Factory
 // 	endpoint.PreFindFilters.ReadOne = []QueryFilter{filter}
 
 // 	router := endpoint.GetRouter()
@@ -113,7 +113,7 @@ func (s *TestSuite) TestCreateWithValidationErrors(c *C) {
 // 	}
 
 // 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = &Factory{}
+// 	endpoint.Factory = Factory
 // 	endpoint.PreFindFilters.ReadOne = []QueryFilter{filter}
 
 // 	router := endpoint.GetRouter()
@@ -147,7 +147,7 @@ func (s *TestSuite) TestCreateWithValidationErrors(c *C) {
 // 	}
 
 // 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = &Factory{}
+// 	endpoint.Factory = Factory
 // 	endpoint.PreResponseFilters.ReadOne = []SingleResponseFilter{filter}
 
 // 	router := endpoint.GetRouter()

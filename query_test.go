@@ -28,7 +28,7 @@ func testQuery(testCase *queryTestCase, c *C) {
 
 	endpoint := NewEndpoint("/api/pages", collection)
 	endpoint.QueryParams = []string{testCase.param}
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 	query, _ := endpoint.getQuery(request)
 
 	c.Assert(query, JSONEquals, testCase.match)

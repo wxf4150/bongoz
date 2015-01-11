@@ -117,7 +117,7 @@ func (e *Endpoint) getQuery(req *http.Request) (bson.M, error) {
 	}
 
 	// Get an instance so we can inspect it with reflection
-	instance := e.Factory.New()
+	instance := e.Factory()
 
 	for _, param := range e.QueryParams {
 		if val, ok := query[param]; ok {

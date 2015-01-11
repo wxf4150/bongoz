@@ -61,9 +61,7 @@ var config = &bongo.Config{
 var connection, _ = bongo.Connect(config)
 var collection = connection.Collection("page")
 
-type Factory struct{}
-
-func (f *Factory) New() interface{} {
+func Factory() interface{} {
 	return &Page{}
 }
 
@@ -101,9 +99,7 @@ type validatedModel struct {
 	Content string        `json:"content"`
 }
 
-type validFactory struct{}
-
-func (f *validFactory) New() interface{} {
+func ValidFactory() interface{} {
 	return &validatedModel{}
 }
 

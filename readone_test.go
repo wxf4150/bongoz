@@ -21,7 +21,7 @@ import (
 func (s *TestSuite) TestReadOne(c *C) {
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
@@ -59,7 +59,7 @@ func (s *TestSuite) TestReadOneWithPassingPreFindFilter(c *C) {
 	}
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 	endpoint.PreFindFilters = []QueryFilter{filter}
 
 	router := endpoint.GetRouter()
@@ -92,7 +92,7 @@ func (s *TestSuite) TestReadOneWithFailingPreFindFilter(c *C) {
 	}
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 	endpoint.PreFindFilters = []QueryFilter{filter}
 
 	router := endpoint.GetRouter()
@@ -126,7 +126,7 @@ func (s *TestSuite) TestReadOneWithFailingPreResponseFilter(c *C) {
 	}
 
 	endpoint := NewEndpoint("/api/pages", collection)
-	endpoint.Factory = &Factory{}
+	endpoint.Factory = Factory
 	endpoint.PreResponseSingleFilters = []SingleResponseFilter{filter}
 
 	router := endpoint.GetRouter()

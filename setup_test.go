@@ -9,6 +9,7 @@ import (
 	"time"
 	// "net/url"
 	"encoding/json"
+
 	"testing"
 )
 
@@ -106,7 +107,7 @@ func (f *validFactory) New() interface{} {
 	return &validatedModel{}
 }
 
-func (v *validatedModel) Validate() []string {
+func (v *validatedModel) Validate(collection *bongo.Collection) []string {
 	ret := []string{}
 	if !bongo.ValidateRequired(v.Content) {
 		ret = append(ret, "Content is required")

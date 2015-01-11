@@ -189,19 +189,21 @@ func (e *Endpoint) SetMiddleware(method string, chain alice.Chain) *Endpoint {
 // Use this is you want to use a subroute, a custom http.Server instance, etc
 func (e *Endpoint) GetRouter() *mux.Router {
 	r := mux.NewRouter()
+	e.registerRoutes(r)
+	return r
+}
+
+func (e *Endpoint) registerRoutes(r *mux.Router) {
 	r.Handle(e.Uri, e.Middleware.ReadList.ThenFunc(e.HandleReadList)).Methods("GET")
 	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.ReadOne.ThenFunc(e.HandleReadOne)).Methods("GET")
 	r.Handle(e.Uri, e.Middleware.Create.ThenFunc(e.HandleCreate)).Methods("POST")
 	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Update.ThenFunc(e.HandleUpdate)).Methods("PUT")
 	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Delete.ThenFunc(e.HandleDelete)).Methods("DELETE")
-	return r
 }
 
 // Register the endpoint to the http root handler. Use GetRouter() for more flexibility
-func (e *Endpoint) Register() {
-	// Make a new router
-	r := e.GetRouter()
-	http.Handle("/", r)
+func (e *Endpoint) Register(r *mux.Router) {
+	e.registerRoutes(r)
 }
 
 func handleError(w http.ResponseWriter) {

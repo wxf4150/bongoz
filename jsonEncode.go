@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding"
 	"encoding/base64"
+	// "log"
 	"math"
 	"reflect"
 	"runtime"
@@ -420,8 +421,13 @@ func marshalerEncoder(e *encodeState, v reflect.Value, quoted bool) {
 		return
 	}
 	m := v.Interface().(Marshaler)
+
 	b, err := m.MarshalJSON()
 	if err == nil {
+
+		if strings.HasSuffix(v.Type().String(), "time.Time") && string(b) == `"0001-01-01T00:00:00Z"` {
+			b = []byte(`""`)
+		}
 		// copy JSON into buffer, checking validity.
 		err = compact(&e.Buffer, b, true)
 	}
@@ -621,6 +627,7 @@ func (me *mapEncoder) encode(e *encodeState, v reflect.Value, _ bool) {
 		if i > 0 {
 			e.WriteByte(',')
 		}
+
 		e.string(k.String())
 		e.WriteByte(':')
 		me.elemEnc(e, v.MapIndex(k), false)

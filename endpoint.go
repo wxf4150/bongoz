@@ -34,10 +34,10 @@ type PaginationConfig struct {
 	Sort    []SortConfig
 }
 
-type QueryFilter func(*http.Request, bson.M) (error, int)
-type DocumentFilter func(*http.Request, interface{}) (error, int)
+type QueryFilter func(*http.Request, string, bson.M) (error, int)
+type DocumentFilter func(*http.Request, string, interface{}) (error, int)
 type ListResponseFilter func(*http.Request, *HTTPListResponse) (error, int)
-type SingleResponseFilter func(*http.Request, *HTTPSingleResponse) (error, int)
+type SingleResponseFilter func(*http.Request, string, *HTTPSingleResponse) (error, int)
 type PostWriteResponseHook func(*http.Request, string, interface{})
 type PostReadResponseHook func(*http.Request, string)
 
@@ -79,32 +79,6 @@ type modelFactory interface {
 	New() interface{}
 }
 
-type PreFindFilters struct {
-	ReadOne  []QueryFilter
-	ReadList []QueryFilter
-	Update   []QueryFilter
-	Delete   []QueryFilter
-}
-
-type PreSaveFilters struct {
-	Create []DocumentFilter
-	Update []DocumentFilter
-	Delete []DocumentFilter
-}
-
-type PostRetrieveFilters struct {
-	Update []DocumentFilter
-	Delete []DocumentFilter
-}
-
-type PreResponseFilters struct {
-	ReadOne  []SingleResponseFilter
-	ReadList []ListResponseFilter
-	Create   []SingleResponseFilter
-	Update   []SingleResponseFilter
-	Delete   []SingleResponseFilter
-}
-
 type Middleware struct {
 	ReadOne  alice.Chain
 	ReadList alice.Chain
@@ -114,20 +88,22 @@ type Middleware struct {
 }
 
 type Endpoint struct {
-	Collection             *bongo.Collection
-	Uri                    string
-	QueryParams            []string
-	Pagination             *PaginationConfig
-	PreServeFilters        []PreServeFilter
-	PreFindFilters         *PreFindFilters
-	PreSaveFilters         *PreSaveFilters
-	PostRetrieveFilters    *PostRetrieveFilters
-	PreResponseFilters     *PreResponseFilters
-	PostWriteResponseHooks []PostWriteResponseHook
-	PostReadResponseHooks  []PostReadResponseHook
-	Factory                modelFactory
-	Middleware             *Middleware
-	AllowFullQuery         bool
+	Collection               *bongo.Collection
+	Uri                      string
+	QueryParams              []string
+	Pagination               *PaginationConfig
+	PreServeFilters          []PreServeFilter
+	PreFindFilters           []QueryFilter
+	PreSaveFilters           []DocumentFilter
+	PostRetrieveFilters      []DocumentFilter
+	PreResponseListFilters   []ListResponseFilter
+	PreResponseSingleFilters []SingleResponseFilter
+	PostWriteResponseHooks   []PostWriteResponseHook
+	PostReadResponseHooks    []PostReadResponseHook
+	Factory                  modelFactory
+	Middleware               *Middleware
+	SoftDelete               bool
+	AllowFullQuery           bool
 }
 
 func NewEndpoint(uri string, collection *bongo.Collection) *Endpoint {
@@ -137,10 +113,6 @@ func NewEndpoint(uri string, collection *bongo.Collection) *Endpoint {
 	endpoint.Pagination = &PaginationConfig{}
 
 	endpoint.Middleware = new(Middleware)
-	endpoint.PreFindFilters = new(PreFindFilters)
-	endpoint.PreSaveFilters = new(PreSaveFilters)
-	endpoint.PostRetrieveFilters = new(PostRetrieveFilters)
-	endpoint.PreResponseFilters = new(PreResponseFilters)
 
 	return endpoint
 }
@@ -287,8 +259,8 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run pre filters for readList
-	for _, f := range e.PreFindFilters.ReadList {
-		err, code = f(req, query)
+	for _, f := range e.PreFindFilters {
+		err, code = f(req, "readList", query)
 		if err != nil {
 			break
 		}
@@ -360,7 +332,7 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 
 	// Filters can modify the response and optionally return a non-nil error, in which case the server's response will be a new
 	// HTTP error with the provided error code. Code defaults to 500 if zero (not set)
-	for _, f := range e.PreResponseFilters.ReadList {
+	for _, f := range e.PreResponseListFilters {
 		err, code = f(req, httpResponse)
 		if err != nil {
 			break
@@ -431,8 +403,8 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run it through the filters
-	for _, f := range e.PreFindFilters.ReadOne {
-		err, code = f(req, query)
+	for _, f := range e.PreFindFilters {
+		err, code = f(req, "readOne", query)
 		if err != nil {
 			break
 		}
@@ -461,8 +433,8 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	httpResponse := &HTTPSingleResponse{instance}
 
 	// Run pre response filters
-	for _, f := range e.PreResponseFilters.ReadOne {
-		err, code = f(req, httpResponse)
+	for _, f := range e.PreResponseSingleFilters {
+		err, code = f(req, "readOne", httpResponse)
 		if err != nil {
 			break
 		}
@@ -533,8 +505,8 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run pre save filters
-	for _, f := range e.PreSaveFilters.Create {
-		err, code = f(req, obj)
+	for _, f := range e.PreSaveFilters {
+		err, code = f(req, "create", obj)
 		if err != nil {
 			break
 		}
@@ -559,8 +531,8 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 	httpResponse := &HTTPSingleResponse{obj}
 
 	// Run pre response filters
-	for _, f := range e.PreResponseFilters.ReadOne {
-		err, code = f(req, httpResponse)
+	for _, f := range e.PreResponseSingleFilters {
+		err, code = f(req, "create", httpResponse)
 		if err != nil {
 			break
 		}
@@ -627,8 +599,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run it through the filters
-	for _, f := range e.PreFindFilters.Update {
-		err, code = f(req, query)
+	for _, f := range e.PreFindFilters {
+		err, code = f(req, "update", query)
 		if err != nil {
 			break
 		}
@@ -659,6 +631,20 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	for _, f := range e.PostRetrieveFilters {
+		err, code = f(req, "update", instance)
+		if err != nil {
+			break
+		}
+	}
+	if err != nil {
+		if code <= 0 {
+			code = http.StatusInternalServerError
+		}
+		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		return
+	}
+
 	if trackable, ok := instance.(bongo.Trackable); ok {
 		trackable.GetDiffTracker().Reset()
 	}
@@ -670,8 +656,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run pre save filters
-	for _, f := range e.PreSaveFilters.Update {
-		err, code = f(req, instance)
+	for _, f := range e.PreSaveFilters {
+		err, code = f(req, "update", instance)
 		if err != nil {
 			break
 		}
@@ -696,8 +682,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	httpResponse := &HTTPSingleResponse{instance}
 
 	// Run pre response filters
-	for _, f := range e.PreResponseFilters.Update {
-		err, code = f(req, httpResponse)
+	for _, f := range e.PreResponseSingleFilters {
+		err, code = f(req, "update", httpResponse)
 		if err != nil {
 			break
 		}
@@ -763,8 +749,8 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Run it through the filters
-	for _, f := range e.PreFindFilters.Update {
-		err, code = f(req, query)
+	for _, f := range e.PreFindFilters {
+		err, code = f(req, "update", query)
 		if err != nil {
 			break
 		}
@@ -783,26 +769,19 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	// Use a FindOne instead of FindById since the query filters may need
 	// to add additional parameters to the search query, aside from just ID.
 	// Error here is just if there is no document
-	//
+
 	err = e.Collection.FindOne(query, instance)
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
 		return
 	}
 
-	if err != nil {
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
-		return
-	}
-
-	// Run pre save filters
-	for _, f := range e.PreSaveFilters.Update {
-		err, code = f(req, instance)
+	for _, f := range e.PostRetrieveFilters {
+		err, code = f(req, "delete", instance)
 		if err != nil {
 			break
 		}
 	}
-
 	if err != nil {
 		if code <= 0 {
 			code = http.StatusInternalServerError
@@ -811,6 +790,13 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if e.SoftDelete {
+		// Prepare for save but save in diff collection
+		prepared := e.Collection.PrepDocumentForSave(instance)
+
+		e.Collection.Connection.Collection(strings.Join([]string{e.Collection.Name, "deleted"}, "_")).Collection().UpsertId(prepared["_id"], prepared)
+
+	}
 	err = e.Collection.Delete(instance)
 
 	if err != nil {

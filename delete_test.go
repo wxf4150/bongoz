@@ -43,6 +43,36 @@ func (s *TestSuite) TestDelete(c *C) {
 	c.Assert(pagination.TotalRecords, Equals, 0)
 }
 
+func (s *TestSuite) TestSoftDelete(c *C) {
+	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint.Factory = &Factory{}
+	endpoint.SoftDelete = true
+
+	router := endpoint.GetRouter()
+	w := httptest.NewRecorder()
+
+	obj := &Page{
+		Content:  "Foo",
+		IntValue: 5,
+	}
+
+	res := endpoint.Collection.Save(obj)
+	c.Assert(res.Success, Equals, true)
+
+	req, _ := http.NewRequest("DELETE", strings.Join([]string{"/api/pages", obj.Id.Hex()}, "/"), nil)
+	router.ServeHTTP(w, req)
+
+	c.Assert(w.Code, Equals, 200)
+	pagination, _ := endpoint.Collection.Find(nil).Paginate(50, 1)
+
+	c.Assert(pagination.TotalRecords, Equals, 0)
+
+	result := &Page{}
+	connection.Collection("page_deleted").FindOne(nil, result)
+
+	c.Assert(result.Id.Hex(), Equals, obj.Id.Hex())
+}
+
 // func (s *TestSuite) TestUpdateWithValidationErrors(c *C) {
 
 // 	endpoint := NewEndpoint("/api/pages", collection)

@@ -53,14 +53,14 @@ func (s *TestSuite) TestReadOne(c *C) {
 }
 
 func (s *TestSuite) TestReadOneWithPassingPreFindFilter(c *C) {
-	filter := func(req *http.Request, q bson.M) (error, int) {
+	filter := func(req *http.Request, method string, q bson.M) (error, int) {
 		q["foo"] = "bar"
 		return nil, 0
 	}
 
 	endpoint := NewEndpoint("/api/pages", collection)
 	endpoint.Factory = &Factory{}
-	endpoint.PreFindFilters.ReadOne = []QueryFilter{filter}
+	endpoint.PreFindFilters = []QueryFilter{filter}
 
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
@@ -87,13 +87,13 @@ func (s *TestSuite) TestReadOneWithPassingPreFindFilter(c *C) {
 }
 
 func (s *TestSuite) TestReadOneWithFailingPreFindFilter(c *C) {
-	filter := func(req *http.Request, q bson.M) (error, int) {
+	filter := func(req *http.Request, method string, q bson.M) (error, int) {
 		return errors.New("test"), 504
 	}
 
 	endpoint := NewEndpoint("/api/pages", collection)
 	endpoint.Factory = &Factory{}
-	endpoint.PreFindFilters.ReadOne = []QueryFilter{filter}
+	endpoint.PreFindFilters = []QueryFilter{filter}
 
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
@@ -121,13 +121,13 @@ func (s *TestSuite) TestReadOneWithFailingPreFindFilter(c *C) {
 }
 
 func (s *TestSuite) TestReadOneWithFailingPreResponseFilter(c *C) {
-	filter := func(req *http.Request, res *HTTPSingleResponse) (error, int) {
+	filter := func(req *http.Request, method string, res *HTTPSingleResponse) (error, int) {
 		return errors.New("test"), 504
 	}
 
 	endpoint := NewEndpoint("/api/pages", collection)
 	endpoint.Factory = &Factory{}
-	endpoint.PreResponseFilters.ReadOne = []SingleResponseFilter{filter}
+	endpoint.PreResponseSingleFilters = []SingleResponseFilter{filter}
 
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()

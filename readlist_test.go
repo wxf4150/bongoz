@@ -81,13 +81,13 @@ func (s *TestSuite) TestReadListWithMiddleware(c *C) {
 
 func (s *TestSuite) TestReadListWithFailingPreFindFilter(c *C) {
 
-	filter := func(req *http.Request, q bson.M) (error, int) {
+	filter := func(req *http.Request, method string, q bson.M) (error, int) {
 		return errors.New("foo"), 503
 	}
 	endpoint := NewEndpoint("/api/pages", collection)
 	endpoint.Factory = &Factory{}
 
-	endpoint.PreFindFilters.ReadList = []QueryFilter{filter}
+	endpoint.PreFindFilters = []QueryFilter{filter}
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
 
@@ -100,14 +100,14 @@ func (s *TestSuite) TestReadListWithFailingPreFindFilter(c *C) {
 
 func (s *TestSuite) TestReadListWithPassingPreFindFilter(c *C) {
 
-	filter := func(req *http.Request, q bson.M) (error, int) {
+	filter := func(req *http.Request, method string, q bson.M) (error, int) {
 		q["content"] = "foo"
 		return nil, 0
 	}
 	endpoint := NewEndpoint("/api/pages", collection)
 	endpoint.Factory = &Factory{}
 
-	endpoint.PreFindFilters.ReadList = []QueryFilter{filter}
+	endpoint.PreFindFilters = []QueryFilter{filter}
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
 
@@ -142,19 +142,19 @@ func (s *TestSuite) TestReadListWithPassingPreFindFilter(c *C) {
 
 func (s *TestSuite) TestReadListWithMultiplePreFindFilters(c *C) {
 
-	filter := func(req *http.Request, q bson.M) (error, int) {
+	filter := func(req *http.Request, method string, q bson.M) (error, int) {
 		q["content"] = "foo"
 		return nil, 0
 	}
 
-	filter2 := func(req *http.Request, q bson.M) (error, int) {
+	filter2 := func(req *http.Request, method string, q bson.M) (error, int) {
 		q["bing"] = "baz"
 		return nil, 0
 	}
 	endpoint := NewEndpoint("/api/pages", collection)
 	endpoint.Factory = &Factory{}
 
-	endpoint.PreFindFilters.ReadList = []QueryFilter{filter, filter2}
+	endpoint.PreFindFilters = []QueryFilter{filter, filter2}
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
 
@@ -195,7 +195,7 @@ func (s *TestSuite) TestReadListWithFailingPreResponseFilter(c *C) {
 	endpoint := NewEndpoint("/api/pages", collection)
 	endpoint.Factory = &Factory{}
 
-	endpoint.PreResponseFilters.ReadList = []ListResponseFilter{filter}
+	endpoint.PreResponseListFilters = []ListResponseFilter{filter}
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
 

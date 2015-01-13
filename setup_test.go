@@ -59,7 +59,7 @@ var config = &bongo.Config{
 }
 
 var connection, _ = bongo.Connect(config)
-var collection = connection.Collection("page")
+var collection = connection.Collection("pages")
 
 func Factory() interface{} {
 	return &Page{}

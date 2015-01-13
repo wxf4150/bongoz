@@ -26,7 +26,7 @@ func testQuery(testCase *queryTestCase, c *C) {
 		URL: parsed,
 	}
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.QueryParams = []string{testCase.param}
 	endpoint.Factory = Factory
 	query, _ := endpoint.getQuery(request)
@@ -79,7 +79,7 @@ func (s *TestSuite) TestFullQuery(c *C) {
 		URL: parsed,
 	}
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.AllowFullQuery = true
 	query, _ := endpoint.getQuery(request)
 

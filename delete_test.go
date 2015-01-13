@@ -20,7 +20,7 @@ import (
 
 func (s *TestSuite) TestDelete(c *C) {
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	router := endpoint.GetRouter()
@@ -31,20 +31,20 @@ func (s *TestSuite) TestDelete(c *C) {
 		IntValue: 5,
 	}
 
-	res := endpoint.Collection.Save(obj)
+	res := collection.Save(obj)
 	c.Assert(res.Success, Equals, true)
 
 	req, _ := http.NewRequest("DELETE", strings.Join([]string{"/api/pages", obj.Id.Hex()}, "/"), nil)
 	router.ServeHTTP(w, req)
 
 	c.Assert(w.Code, Equals, 200)
-	pagination, _ := endpoint.Collection.Find(nil).Paginate(50, 1)
+	pagination, _ := collection.Find(nil).Paginate(50, 1)
 
 	c.Assert(pagination.TotalRecords, Equals, 0)
 }
 
 func (s *TestSuite) TestSoftDelete(c *C) {
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 	endpoint.SoftDelete = true
 
@@ -56,19 +56,19 @@ func (s *TestSuite) TestSoftDelete(c *C) {
 		IntValue: 5,
 	}
 
-	res := endpoint.Collection.Save(obj)
+	res := collection.Save(obj)
 	c.Assert(res.Success, Equals, true)
 
 	req, _ := http.NewRequest("DELETE", strings.Join([]string{"/api/pages", obj.Id.Hex()}, "/"), nil)
 	router.ServeHTTP(w, req)
 
 	c.Assert(w.Code, Equals, 200)
-	pagination, _ := endpoint.Collection.Find(nil).Paginate(50, 1)
+	pagination, _ := collection.Find(nil).Paginate(50, 1)
 
 	c.Assert(pagination.TotalRecords, Equals, 0)
 
 	result := &Page{}
-	connection.Collection("page_deleted").FindOne(nil, result)
+	connection.Collection("pages_deleted").FindOne(nil, result)
 
 	c.Assert(result.Id.Hex(), Equals, obj.Id.Hex())
 }

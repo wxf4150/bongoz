@@ -20,7 +20,7 @@ import (
 
 func (s *TestSuite) TestUpdate(c *C) {
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	router := endpoint.GetRouter()
@@ -31,7 +31,7 @@ func (s *TestSuite) TestUpdate(c *C) {
 		IntValue: 5,
 	}
 
-	res := endpoint.Collection.Save(obj)
+	res := collection.Save(obj)
 	c.Assert(res.Success, Equals, true)
 
 	updated := map[string]string{
@@ -61,7 +61,7 @@ func (s *TestSuite) TestUpdate(c *C) {
 
 func (s *TestSuite) TestUpdateWithValidationErrors(c *C) {
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = ValidFactory
 
 	router := endpoint.GetRouter()
@@ -71,7 +71,7 @@ func (s *TestSuite) TestUpdateWithValidationErrors(c *C) {
 		Content: "Biff",
 	}
 
-	res := endpoint.Collection.Save(obj)
+	res := collection.Save(obj)
 
 	c.Assert(res.Success, Equals, true)
 

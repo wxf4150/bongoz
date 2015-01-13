@@ -25,7 +25,7 @@ type listResponse struct {
 
 func (s *TestSuite) TestReadList(c *C) {
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	router := endpoint.GetRouter()
@@ -63,7 +63,7 @@ func (s *TestSuite) TestReadList(c *C) {
 }
 
 func (s *TestSuite) TestReadListWithMiddleware(c *C) {
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	endpoint.Middleware.ReadList = alice.New(errorMiddleware)
@@ -84,7 +84,7 @@ func (s *TestSuite) TestReadListWithFailingPreFindFilter(c *C) {
 	filter := func(req *http.Request, method string, q bson.M) (error, int) {
 		return errors.New("foo"), 503
 	}
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	endpoint.PreFindFilters = []QueryFilter{filter}
@@ -104,7 +104,7 @@ func (s *TestSuite) TestReadListWithPassingPreFindFilter(c *C) {
 		q["content"] = "foo"
 		return nil, 0
 	}
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	endpoint.PreFindFilters = []QueryFilter{filter}
@@ -151,7 +151,7 @@ func (s *TestSuite) TestReadListWithMultiplePreFindFilters(c *C) {
 		q["bing"] = "baz"
 		return nil, 0
 	}
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	endpoint.PreFindFilters = []QueryFilter{filter, filter2}
@@ -192,7 +192,7 @@ func (s *TestSuite) TestReadListWithFailingPreResponseFilter(c *C) {
 	filter := func(req *http.Request, r *HTTPListResponse) (error, int) {
 		return errors.New("bar"), 504
 	}
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	endpoint.PreResponseListFilters = []ListResponseFilter{filter}
@@ -216,7 +216,7 @@ func (s *TestSuite) BenchmarkReadList(c *C) {
 		router.ServeHTTP(w, req)
 	}
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	for n := 0; n < 50; n++ {

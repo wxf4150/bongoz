@@ -5,9 +5,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
 	"github.com/maxwellhealth/bongo"
-	"labix.org/v2/mgo/bson"
-	// "github.com/oleiade/reflections"
+	"github.com/oleiade/reflections"
 	"io"
+	"labix.org/v2/mgo/bson"
 	// "labix.org/v2/mgo/bson"
 	"errors"
 	"log"
@@ -40,21 +40,22 @@ type ListResponseFilter func(*http.Request, *HTTPListResponse) (error, int)
 type SingleResponseFilter func(*http.Request, string, *HTTPSingleResponse) (error, int)
 type PostWriteResponseHook func(*http.Request, string, interface{})
 type PostReadResponseHook func(*http.Request, string)
+type CollectionNameFilter func(*http.Request, string) string
 
 // Use this to inspect the request body, for signature-based security, etc
 type PreServeFilter func(*http.Request, []byte) (error, int)
 
 type HTTPListResponse struct {
-	Pagination *bongo.PaginationInfo `jsonutils:"pagination"`
-	Data       []interface{}         `jsonutils:"data"`
+	Pagination *bongo.PaginationInfo
+	Data       []interface{}
 }
 
 type HTTPSingleResponse struct {
-	Data interface{} `jsonutils:"data"`
+	Data interface{}
 }
 
 type HTTPErrorResponse struct {
-	Error error `jsonutils:"error"`
+	Error error
 }
 
 func NewErrorResponse(err error) *HTTPErrorResponse {
@@ -86,7 +87,8 @@ type Middleware struct {
 }
 
 type Endpoint struct {
-	Collection               *bongo.Collection
+	CollectionName           string
+	Connection               *bongo.Connection
 	Uri                      string
 	QueryParams              []string
 	Pagination               *PaginationConfig
@@ -98,20 +100,20 @@ type Endpoint struct {
 	PreResponseSingleFilters []SingleResponseFilter
 	PostWriteResponseHooks   []PostWriteResponseHook
 	PostReadResponseHooks    []PostReadResponseHook
+	CollectionNameFilters    []CollectionNameFilter
 	Factory                  ModelFactory
 	Middleware               *Middleware
 	SoftDelete               bool
 	AllowFullQuery           bool
 }
 
-func NewEndpoint(uri string, collection *bongo.Collection) *Endpoint {
+func NewEndpoint(uri string, connection *bongo.Connection, collectionName string) *Endpoint {
 	endpoint := new(Endpoint)
 	endpoint.Uri = uri
-	endpoint.Collection = collection
+	endpoint.Connection = connection
+	endpoint.CollectionName = collectionName
 	endpoint.Pagination = &PaginationConfig{}
-
 	endpoint.Middleware = new(Middleware)
-
 	return endpoint
 }
 
@@ -265,7 +267,6 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 			break
 		}
 	}
-
 	if err != nil {
 		if code <= 0 {
 			code = http.StatusInternalServerError
@@ -274,7 +275,13 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	results := e.Collection.Find(query)
+	collectionName := e.CollectionName
+	// Pass collection name through filters
+	for _, f := range e.CollectionNameFilters {
+		collectionName = f(req, collectionName)
+	}
+
+	results := e.Connection.Collection(collectionName).Find(query)
 
 	// Default pagination is 50
 	if e.Pagination.PerPage == 0 {
@@ -420,10 +427,16 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	// Execute the find
 	instance := e.Factory()
 
+	collectionName := e.CollectionName
+	// Pass collection name through filters
+	for _, f := range e.CollectionNameFilters {
+		collectionName = f(req, collectionName)
+	}
+
 	// Use a FindOne instead of FindById since the query filters may need
 	// to add additional parameters to the search query, aside from just ID.
 	// Error here is just if there is no document
-	err = e.Collection.FindOne(query, instance)
+	err = e.Connection.Collection(collectionName).FindOne(query, instance)
 
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
@@ -520,7 +533,13 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result := e.Collection.Save(obj)
+	collectionName := e.CollectionName
+	// Pass collection name through filters
+	for _, f := range e.CollectionNameFilters {
+		collectionName = f(req, collectionName)
+	}
+
+	result := e.Connection.Collection(collectionName).Save(obj)
 
 	if result.Success == false {
 		// Make a new JSON e
@@ -613,19 +632,20 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	collectionName := e.CollectionName
+	// Pass collection name through filters
+	for _, f := range e.CollectionNameFilters {
+		collectionName = f(req, collectionName)
+	}
+
 	// Execute the find
 	instance := e.Factory()
-
-	// Instantiate diff tracker
-	if trackable, ok := instance.(bongo.Trackable); ok {
-		trackable.GetDiffTracker().Reset()
-	}
 
 	// Use a FindOne instead of FindById since the query filters may need
 	// to add additional parameters to the search query, aside from just ID.
 	// Error here is just if there is no document
 	//
-	err = e.Collection.FindOne(query, instance)
+	err = e.Connection.Collection(collectionName).FindOne(query, instance)
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
 		return
@@ -649,11 +669,16 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		trackable.GetDiffTracker().Reset()
 	}
 
+	// Save the ID and reapply it afterward, so we do not allow the http request to modify the ID
+	actualId, _ := reflections.GetField(instance, "Id")
+
 	err = json.Unmarshal(body, instance)
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
 		return
 	}
+
+	reflections.SetField(instance, "Id", actualId)
 
 	// Run pre save filters
 	for _, f := range e.PreSaveFilters {
@@ -671,7 +696,7 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result := e.Collection.Save(instance)
+	result := e.Connection.Collection(collectionName).Save(instance)
 
 	if result.Success == false {
 		// Make a new JSON e
@@ -732,6 +757,12 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	collectionName := e.CollectionName
+	// Pass collection name through filters
+	for _, f := range e.CollectionNameFilters {
+		collectionName = f(req, collectionName)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	start := time.Now()
 
@@ -755,6 +786,7 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 			break
 		}
 	}
+
 	if err != nil {
 		if code <= 0 {
 			code = http.StatusInternalServerError
@@ -770,7 +802,7 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	// to add additional parameters to the search query, aside from just ID.
 	// Error here is just if there is no document
 
-	err = e.Collection.FindOne(query, instance)
+	err = e.Connection.Collection(collectionName).FindOne(query, instance)
 	if err != nil {
 		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
 		return
@@ -790,14 +822,15 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	collection := e.Connection.Collection(collectionName)
 	if e.SoftDelete {
 		// Prepare for save but save in diff collection
-		prepared := e.Collection.PrepDocumentForSave(instance)
+		prepared := collection.PrepDocumentForSave(instance)
 
-		e.Collection.Connection.Collection(strings.Join([]string{e.Collection.Name, "deleted"}, "_")).Collection().UpsertId(prepared["_id"], prepared)
+		e.Connection.Collection(strings.Join([]string{collection.Name, "deleted"}, "_")).Collection().UpsertId(prepared["_id"], prepared)
 
 	}
-	err = e.Collection.Delete(instance)
+	err = e.Connection.Collection(collectionName).Delete(instance)
 
 	if err != nil {
 		// Make a new JSON e

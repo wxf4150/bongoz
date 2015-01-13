@@ -20,7 +20,7 @@ import (
 
 func (s *TestSuite) TestCreate(c *C) {
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = Factory
 
 	router := endpoint.GetRouter()
@@ -50,7 +50,7 @@ func (s *TestSuite) TestCreate(c *C) {
 
 func (s *TestSuite) TestCreateWithValidationErrors(c *C) {
 
-	endpoint := NewEndpoint("/api/pages", collection)
+	endpoint := NewEndpoint("/api/pages", connection, "pages")
 	endpoint.Factory = ValidFactory
 
 	router := endpoint.GetRouter()

@@ -1,10 +1,10 @@
 package bongoz
 
 import (
-	"encoding/json"
 	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
 	"github.com/maxwellhealth/bongo"
+	"github.com/maxwellhealth/bongoz/json"
 	"github.com/oleiade/reflections"
 	"io"
 	"labix.org/v2/mgo/bson"
@@ -62,15 +62,34 @@ func NewErrorResponse(err error) *HTTPErrorResponse {
 	return &HTTPErrorResponse{err}
 }
 
+type HTTPMultiErrorResponse struct {
+	Errors []string
+}
+
+func NewMultiErrorResponse(errs []error) *HTTPMultiErrorResponse {
+	// This is only from json unmarshal
+	parsed := make([]string, len(errs))
+
+	for i, e := range errs {
+		parsed[i] = e.Error()
+	}
+	return &HTTPMultiErrorResponse{parsed}
+}
+
+func (e *HTTPMultiErrorResponse) ToJSON() string {
+	marshaled, _ := json.Marshal(e)
+	return string(marshaled)
+}
+
 func (e *HTTPErrorResponse) ToJSON() string {
 
 	if reflect.TypeOf(e.Error).String() != "*bongo.SaveResult" {
 		m := make(map[string]string)
 		m["error"] = e.Error.Error()
-		marshaled, _ := MarshalJSON(m)
+		marshaled, _ := json.Marshal(m)
 		return string(marshaled)
 	} else {
-		marshaled, _ := MarshalJSON(e)
+		marshaled, _ := json.Marshal(e)
 		return string(marshaled)
 	}
 
@@ -247,7 +266,8 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -256,7 +276,8 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	query, err := e.getQuery(req)
 
 	if err != nil {
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -271,7 +292,8 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -350,14 +372,16 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
-	marshaled, err := MarshalJSON(httpResponse)
+	marshaled, err := json.Marshal(httpResponse)
 
 	if err != nil {
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -390,7 +414,8 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -420,7 +445,8 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -439,7 +465,8 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	err = e.Connection.Collection(collectionName).FindOne(query, instance)
 
 	if err != nil {
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -457,13 +484,15 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
-	marshaled, err := MarshalJSON(httpResponse)
+	marshaled, err := json.Marshal(httpResponse)
 	if err != nil {
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -496,7 +525,8 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -511,11 +541,17 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 		trackable.GetDiffTracker().Reset()
 	}
 
-	err = json.Unmarshal(body, obj)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	errs := json.Unmarshal(body, obj)
+
+	if len(errs) > 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, NewMultiErrorResponse(errs).ToJSON())
 		return
 	}
+	// if err != nil {
+	// 	http.Error(w, err.Error(), http.StatusBadRequest)
+	// 	return
+	// }
 
 	// Run pre save filters
 	for _, f := range e.PreSaveFilters {
@@ -529,7 +565,8 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -543,7 +580,8 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 
 	if result.Success == false {
 		// Make a new JSON e
-		http.Error(w, NewErrorResponse(result).ToJSON(), http.StatusBadRequest)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(result).ToJSON())
 		return
 	}
 
@@ -561,11 +599,12 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
-	marshaled, _ := MarshalJSON(httpResponse)
+	marshaled, _ := json.Marshal(httpResponse)
 
 	w.WriteHeader(http.StatusCreated)
 	io.WriteString(w, string(marshaled))
@@ -598,7 +637,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -609,7 +649,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	id := vars["id"]
 
 	if len(id) == 0 || !bson.IsObjectIdHex(id) {
-		http.Error(w, NewErrorResponse(errors.New("Invalid object ID")).ToJSON(), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, NewErrorResponse(errors.New("Invalid Object ID")).ToJSON())
 		return
 	}
 
@@ -628,7 +669,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -647,7 +689,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	//
 	err = e.Connection.Collection(collectionName).FindOne(query, instance)
 	if err != nil {
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -661,7 +704,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -672,9 +716,10 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	// Save the ID and reapply it afterward, so we do not allow the http request to modify the ID
 	actualId, _ := reflections.GetField(instance, "Id")
 
-	err = json.Unmarshal(body, instance)
-	if err != nil {
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
+	errs := json.Unmarshal(body, instance)
+	if len(errs) > 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, NewMultiErrorResponse(errs).ToJSON())
 		return
 	}
 
@@ -692,7 +737,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -700,7 +746,8 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 
 	if result.Success == false {
 		// Make a new JSON e
-		http.Error(w, NewErrorResponse(result).ToJSON(), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -718,11 +765,12 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
-	marshaled, _ := MarshalJSON(httpResponse)
+	marshaled, _ := json.Marshal(httpResponse)
 
 	io.WriteString(w, string(marshaled))
 	elapsed := time.Since(start)
@@ -753,7 +801,8 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -771,7 +820,8 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	id := vars["id"]
 
 	if len(id) == 0 || !bson.IsObjectIdHex(id) {
-		http.Error(w, NewErrorResponse(errors.New("Invalid object ID")).ToJSON(), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, NewErrorResponse(errors.New("Invalid Object ID")).ToJSON())
 		return
 	}
 
@@ -791,7 +841,8 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -804,7 +855,8 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 
 	err = e.Connection.Collection(collectionName).FindOne(query, instance)
 	if err != nil {
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -818,7 +870,8 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
-		http.Error(w, NewErrorResponse(err).ToJSON(), code)
+		w.WriteHeader(code)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -834,7 +887,8 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 
 	if err != nil {
 		// Make a new JSON e
-		http.Error(w, NewErrorResponse(err).ToJSON(), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 

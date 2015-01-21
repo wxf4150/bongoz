@@ -95,7 +95,7 @@ func (s *TestSuite) TestReadListWithFailingPreFindFilter(c *C) {
 	router.ServeHTTP(w, req)
 
 	c.Assert(w.Code, Equals, 503)
-	c.Assert(w.Body.String(), Equals, "{\"error\":\"foo\"}\n")
+	c.Assert(w.Body.String(), Equals, "{\"error\":\"foo\"}")
 }
 
 func (s *TestSuite) TestReadListWithPassingPreFindFilter(c *C) {
@@ -203,7 +203,7 @@ func (s *TestSuite) TestReadListWithFailingPreResponseFilter(c *C) {
 	router.ServeHTTP(w, req)
 
 	c.Assert(w.Code, Equals, 504)
-	c.Assert(w.Body.String(), Equals, "{\"error\":\"bar\"}\n")
+	c.Assert(w.Body.String(), Equals, "{\"error\":\"bar\"}")
 }
 
 // Serve a collection of 50 elements

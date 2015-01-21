@@ -62,6 +62,20 @@ func NewErrorResponse(err error) *HTTPErrorResponse {
 	return &HTTPErrorResponse{err}
 }
 
+func (e *HTTPErrorResponse) ToJSON() string {
+
+	if reflect.TypeOf(e.Error).String() != "*bongo.SaveResult" {
+		m := make(map[string]string)
+		m["error"] = e.Error.Error()
+		marshaled, _ := json.Marshal(m)
+		return string(marshaled)
+	} else {
+		marshaled, _ := json.Marshal(e)
+		return string(marshaled)
+	}
+
+}
+
 type HTTPMultiErrorResponse struct {
 	Errors []string
 }
@@ -79,20 +93,6 @@ func NewMultiErrorResponse(errs []error) *HTTPMultiErrorResponse {
 func (e *HTTPMultiErrorResponse) ToJSON() string {
 	marshaled, _ := json.Marshal(e)
 	return string(marshaled)
-}
-
-func (e *HTTPErrorResponse) ToJSON() string {
-
-	if reflect.TypeOf(e.Error).String() != "*bongo.SaveResult" {
-		m := make(map[string]string)
-		m["error"] = e.Error.Error()
-		marshaled, _ := json.Marshal(m)
-		return string(marshaled)
-	} else {
-		marshaled, _ := json.Marshal(e)
-		return string(marshaled)
-	}
-
 }
 
 type ModelFactory func() interface{}
@@ -124,6 +124,7 @@ type Endpoint struct {
 	Middleware               *Middleware
 	SoftDelete               bool
 	AllowFullQuery           bool
+	DisableWrites            bool
 }
 
 func NewEndpoint(uri string, connection *bongo.Connection, collectionName string) *Endpoint {
@@ -215,9 +216,13 @@ func (e *Endpoint) GetRouter() *mux.Router {
 func (e *Endpoint) registerRoutes(r *mux.Router) {
 	r.Handle(e.Uri, e.Middleware.ReadList.ThenFunc(e.HandleReadList)).Methods("GET")
 	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.ReadOne.ThenFunc(e.HandleReadOne)).Methods("GET")
-	r.Handle(e.Uri, e.Middleware.Create.ThenFunc(e.HandleCreate)).Methods("POST")
-	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Update.ThenFunc(e.HandleUpdate)).Methods("PUT")
-	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Delete.ThenFunc(e.HandleDelete)).Methods("DELETE")
+
+	if !e.DisableWrites {
+		r.Handle(e.Uri, e.Middleware.Create.ThenFunc(e.HandleCreate)).Methods("POST")
+		r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Update.ThenFunc(e.HandleUpdate)).Methods("PUT")
+		r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Delete.ThenFunc(e.HandleDelete)).Methods("DELETE")
+	}
+
 }
 
 // Register the endpoint to the http root handler. Use GetRouter() for more flexibility
@@ -530,7 +535,7 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	start := time.Now()
+	// start := time.Now()
 
 	// decoder := json.NewDecoder(req.Body)
 
@@ -562,6 +567,7 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err != nil {
+
 		if code <= 0 {
 			code = http.StatusInternalServerError
 		}
@@ -580,7 +586,7 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 
 	if result.Success == false {
 		// Make a new JSON e
-		w.WriteHeader(code)
+		w.WriteHeader(http.StatusBadRequest)
 		io.WriteString(w, NewErrorResponse(result).ToJSON())
 		return
 	}
@@ -608,8 +614,7 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	io.WriteString(w, string(marshaled))
-	elapsed := time.Since(start)
-	log.Printf("Request took %s", elapsed)
+	// elapsed := time.Since(start)
 
 	// Run post response
 	go func() {
@@ -747,7 +752,7 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	if result.Success == false {
 		// Make a new JSON e
 		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
+		io.WriteString(w, NewErrorResponse(result).ToJSON())
 		return
 	}
 

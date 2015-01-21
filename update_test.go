@@ -87,7 +87,7 @@ func (s *TestSuite) TestUpdateWithValidationErrors(c *C) {
 	req, _ := http.NewRequest("PUT", strings.Join([]string{"/api/pages", obj.Id.Hex()}, "/"), reader)
 	router.ServeHTTP(w, req)
 	c.Assert(w.Code, Equals, 400)
-	c.Assert(w.Body.String(), Equals, "{\"error\":[\"Content is required\"]}\n")
+	c.Assert(w.Body.String(), Equals, "{\"error\":[\"Content is required\"]}")
 
 }
 

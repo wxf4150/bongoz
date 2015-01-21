@@ -26,22 +26,14 @@ func (s *TestSuite) TestCreate(c *C) {
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
 
-	obj1 := map[string]string{
-		"Content": "foo",
-	}
-
-	marshaled, err := json.Marshal(obj1)
-
-	c.Assert(err, Equals, nil)
-
-	reader := strings.NewReader(string(marshaled))
+	reader := strings.NewReader(`{"Content":"foo","IdValue":null}`)
 	req, _ := http.NewRequest("POST", "/api/pages", reader)
 	router.ServeHTTP(w, req)
 
 	response := &singleResponse{}
 
 	c.Assert(w.Code, Equals, 201)
-	err = json.Unmarshal(w.Body.Bytes(), response)
+	err := json.Unmarshal(w.Body.Bytes(), response)
 
 	c.Assert(err, Equals, nil)
 
@@ -69,7 +61,7 @@ func (s *TestSuite) TestCreateWithValidationErrors(c *C) {
 	router.ServeHTTP(w, req)
 
 	c.Assert(w.Code, Equals, 400)
-	c.Assert(w.Body.String(), Equals, "{\"error\":[\"Content is required\"]}\n")
+	c.Assert(w.Body.String(), Equals, "{\"error\":[\"Content is required\"]}")
 
 }
 

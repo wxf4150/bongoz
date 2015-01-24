@@ -5,9 +5,9 @@ import (
 	"github.com/justinas/alice"
 	"github.com/maxwellhealth/bongo"
 	"github.com/maxwellhealth/bongoz/json"
+	"github.com/maxwellhealth/mgo/bson"
 	"github.com/oleiade/reflections"
 	"io"
-	"labix.org/v2/mgo/bson"
 	// "labix.org/v2/mgo/bson"
 	"errors"
 	"log"
@@ -308,7 +308,14 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 		collectionName = f(req, collectionName)
 	}
 
+	response := make([]interface{}, 0)
 	results := e.Connection.Collection(collectionName).Find(query)
+
+	// for i := 0; i < 50; i++ {
+	// 	res := e.Factory()
+	// 	results.Next(res)
+	// 	response = append(response, res)
+	// }
 
 	// Default pagination is 50
 	if e.Pagination.PerPage == 0 {
@@ -350,7 +357,6 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 		sortFields := strings.Split(sortParam, ",")
 		results.Query.Sort(sortFields...)
 	}
-	response := make([]interface{}, 0)
 
 	// res := e.Factory.New()
 

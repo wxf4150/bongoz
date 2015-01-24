@@ -2,8 +2,8 @@ package bongoz
 
 import (
 	"github.com/maxwellhealth/bongo"
+	"github.com/maxwellhealth/mgo/bson"
 	. "gopkg.in/check.v1"
-	"labix.org/v2/mgo/bson"
 	"log"
 	"net/http"
 	"time"

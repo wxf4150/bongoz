@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding"
 	"encoding/base64"
+	// "fmt"
 	"math"
 	"reflect"
 	"runtime"
@@ -21,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -413,6 +415,20 @@ func marshalerEncoder(e *encodeState, v reflect.Value, quoted bool) {
 		return
 	}
 	m := v.Interface().(Marshaler)
+
+	// If it's a time, send a null if it's a zero value
+	if v.Type().String() == "time.Time" {
+		if inter, ok := v.Interface().(time.Time); ok {
+			if inter.IsZero() {
+				err := compact(&e.Buffer, []byte("null"), true)
+				if err != nil {
+					e.error(&MarshalerError{v.Type(), err})
+				}
+				return
+			}
+		}
+	}
+
 	b, err := m.MarshalJSON()
 	if err == nil {
 		// copy JSON into buffer, checking validity.
@@ -430,6 +446,7 @@ func addrMarshalerEncoder(e *encodeState, v reflect.Value, quoted bool) {
 		return
 	}
 	m := va.Interface().(Marshaler)
+
 	b, err := m.MarshalJSON()
 	if err == nil {
 		// copy JSON into buffer, checking validity.

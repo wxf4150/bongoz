@@ -8,7 +8,7 @@ import (
 	// "io/ioutil"
 	"encoding/json"
 	"errors"
-	"labix.org/v2/mgo/bson"
+	"github.com/maxwellhealth/mgo/bson"
 	"log"
 	"net/http"
 	"net/http/httptest"

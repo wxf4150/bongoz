@@ -8,8 +8,8 @@ import (
 	// "io/ioutil"
 	"encoding/json"
 	"errors"
-	"labix.org/v2/mgo/bson"
-	"log"
+	"github.com/maxwellhealth/mgo/bson"
+	// "log"
 	"net/http"
 	"net/http/httptest"
 	// "net/url"
@@ -50,16 +50,14 @@ func (s *TestSuite) TestReadList(c *C) {
 
 	response := &listResponse{}
 
-	log.Println(w.Body.String())
 	err := json.Unmarshal(w.Body.Bytes(), response)
 
 	c.Assert(err, Equals, nil)
-
 	c.Assert(response.Pagination.Current, Equals, 1)
 	c.Assert(response.Pagination.TotalPages, Equals, 1)
 	c.Assert(response.Pagination.RecordsOnPage, Equals, 2)
 	c.Assert(len(response.Data), Equals, 2)
-	// log.Println(response)
+
 }
 
 func (s *TestSuite) TestReadListWithMiddleware(c *C) {

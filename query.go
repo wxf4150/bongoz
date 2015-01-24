@@ -2,7 +2,7 @@ package bongoz
 
 import (
 	"encoding/json"
-	"labix.org/v2/mgo/bson"
+	"github.com/maxwellhealth/mgo/bson"
 	"log"
 	"net/http"
 	"strconv"

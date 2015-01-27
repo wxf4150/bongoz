@@ -323,11 +323,37 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	perPage := e.Pagination.PerPage
+	limit := 0
+	skip := 0
 	page := 1
 
 	// Allow override with query vars
 	perPageParam := req.URL.Query().Get("_perPage")
 	pageParam := req.URL.Query().Get("_page")
+
+	// Allow support for limit and skip with no pagination
+	limitParam := req.URL.Query().Get("_limit")
+	skipParam := req.URL.Query().Get("_skip")
+
+	if len(limitParam) > 0 {
+		converted, err := strconv.Atoi(limitParam)
+		// Hard limit to 500 so people can break it
+		if err == nil && converted > 0 {
+			limit = converted
+		}
+	}
+
+	if len(skipParam) > 0 {
+		converted, err := strconv.Atoi(skipParam)
+
+		if err == nil && converted >= 0 {
+			skip = converted
+		}
+	}
+
+	if limit > 0 {
+		results.Query.Limit(limit).Skip(skip)
+	}
 
 	if len(perPageParam) > 0 {
 		converted, err := strconv.Atoi(perPageParam)

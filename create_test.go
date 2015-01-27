@@ -9,7 +9,8 @@ import (
 	"encoding/json"
 	// "errors"
 	// "labix.org/v2/mgo/bson"
-	// "log"
+	// "github.com/maxwellhealth/mgo/bson"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	// "net/url"
@@ -26,18 +27,19 @@ func (s *TestSuite) TestCreate(c *C) {
 	router := endpoint.GetRouter()
 	w := httptest.NewRecorder()
 
-	reader := strings.NewReader(`{"Content":"foo","IdValue":null}`)
+	reader := strings.NewReader(`{"content":"foo","idValue":null, "_id":"540e05189b2212ee6b1f44d3"}`)
 	req, _ := http.NewRequest("POST", "/api/pages", reader)
 	router.ServeHTTP(w, req)
 
 	response := &singleResponse{}
-
+	log.Println(w.Body.String())
 	c.Assert(w.Code, Equals, 201)
 	err := json.Unmarshal(w.Body.Bytes(), response)
 
 	c.Assert(err, Equals, nil)
 
 	c.Assert(response.Data["content"], Equals, "foo")
+	c.Assert(response.Data["_id"], Equals, "540e05189b2212ee6b1f44d3")
 }
 
 func (s *TestSuite) TestCreateWithValidationErrors(c *C) {

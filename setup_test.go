@@ -25,7 +25,7 @@ type NullWriter int
 func (NullWriter) Write([]byte) (int, error) { return 0, nil }
 
 func (s *TestSuite) SetUpTest(c *C) {
-
+	connection.Session.DB(config.Database).DropDatabase()
 	if !testing.Verbose() {
 		log.SetOutput(new(NullWriter))
 	}
@@ -63,10 +63,6 @@ var collection = connection.Collection("pages")
 
 func Factory() interface{} {
 	return &Page{}
-}
-
-func (s *TestSuite) TearDownTest(c *C) {
-	connection.Session.DB(config.Database).DropDatabase()
 }
 
 func (s *TestSuite) TearDownSuite(c *C) {

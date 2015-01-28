@@ -546,12 +546,13 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 
 func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
+
+	start := time.Now()
 	w.Header().Set("Content-Type", "application/json")
 
 	var err error
 	var code int
 	body, err := ioutil.ReadAll(req.Body)
-
 	for _, f := range e.PreServeFilters {
 		err, code = f(req, body)
 		if err != nil {
@@ -648,6 +649,8 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 	io.WriteString(w, string(marshaled))
 	// elapsed := time.Since(start)
 
+	elapsed := time.Since(start)
+	log.Printf("Request took %s", elapsed)
 	// Run post response
 	go func() {
 		for _, f := range e.PostWriteResponseHooks {
@@ -659,6 +662,7 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
+	start := time.Now()
 
 	var err error
 	var code int
@@ -678,8 +682,6 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
-
-	start := time.Now()
 
 	vars := mux.Vars(req)
 
@@ -723,7 +725,7 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	// Use a FindOne instead of FindById since the query filters may need
 	// to add additional parameters to the search query, aside from just ID.
 	// Error here is just if there is no document
-	//
+
 	err = e.Connection.Collection(collectionName).FindOne(query, instance)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)

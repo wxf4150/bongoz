@@ -420,7 +420,7 @@ func marshalerEncoder(e *encodeState, v reflect.Value, quoted bool) {
 	if v.Type().String() == "time.Time" {
 		if inter, ok := v.Interface().(time.Time); ok {
 			if inter.IsZero() {
-				err := compact(&e.Buffer, []byte("null"), true)
+				err := compact(&e.Buffer, []byte("\"\""), true)
 				if err != nil {
 					e.error(&MarshalerError{v.Type(), err})
 				}

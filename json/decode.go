@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -365,7 +366,11 @@ func (d *decodeState) indirect(v reflect.Value, decodingNull bool) (Unmarshaler,
 			v.Set(reflect.New(v.Type().Elem()))
 		}
 		if v.Type().NumMethod() > 0 {
+
 			if u, ok := v.Interface().(Unmarshaler); ok {
+				// if v.Type().String() == "*time.Time" {
+				// 	fmt.Println(v.Interface())
+				// }
 				return u, nil, reflect.Value{}
 			}
 			if u, ok := v.Interface().(encoding.TextUnmarshaler); ok {
@@ -698,6 +703,12 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 	if u != nil {
 		err := u.UnmarshalJSON(item)
 		if err != nil {
+			// Allow null or "" times. Set it to zero value
+			if v.Type().String() == "time.Time" && (string(item) == "null" || string(item) == "\"\"") {
+				fakeTime := time.Time{}
+				v.Set(reflect.ValueOf(fakeTime))
+				return
+			}
 			d.error(err)
 		}
 		return

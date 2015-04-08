@@ -1,4 +1,4 @@
-package restserver
+package bongoz
 
 import (
 	"github.com/DailyFeats/dpl/models/traits"

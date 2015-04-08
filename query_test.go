@@ -1,4 +1,4 @@
-package restserver
+package bongoz
 
 import (
 	// "encoding/base64"

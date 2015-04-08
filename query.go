@@ -1,8 +1,8 @@
-package bongoz
+package restserver
 
 import (
 	"encoding/json"
-	"github.com/maxwellhealth/mgo/bson"
+	"gopkg.in/mgo.v2/bson"
 	"log"
 	"net/http"
 	"strconv"
@@ -106,8 +106,8 @@ func (e *Endpoint) getQuery(req *http.Request) (bson.M, error) {
 	q := bson.M{}
 
 	if e.AllowFullQuery {
-		// Marshal the query json into bson.M
-		val := query.Get("query")
+		// Marshal the query base64 into bson.M
+		val := query.Get("_query")
 
 		if len(val) > 0 {
 			err := json.Unmarshal([]byte(val), &q)

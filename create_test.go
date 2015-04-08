@@ -1,170 +1,81 @@
-package bongoz
+package restserver
 
 import (
-	// "fmt"
-	// "github.com/justinas/alice"
-	// "github.com/maxwellhealth/bongo"
-	. "gopkg.in/check.v1"
-	// "io/ioutil"
 	"encoding/json"
-	// "errors"
-	// "labix.org/v2/mgo/bson"
-	// "github.com/maxwellhealth/mgo/bson"
-	"log"
+	"github.com/maxwellhealth/bongo"
+	. "github.com/smartystreets/goconvey/convey"
 	"net/http"
 	"net/http/httptest"
-	// "net/url"
 	"strings"
-	// "time"
-	// "testing"
+	"testing"
 )
 
-func (s *TestSuite) TestCreate(c *C) {
-
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.Factory = Factory
-
-	router := endpoint.GetRouter()
-	w := httptest.NewRecorder()
-
-	reader := strings.NewReader(`{"content":"foo","idValue":null, "_id":"540e05189b2212ee6b1f44d3"}`)
-	req, _ := http.NewRequest("POST", "/api/pages", reader)
-	router.ServeHTTP(w, req)
-
-	response := &singleResponse{}
-	log.Println(w.Body.String())
-	c.Assert(w.Code, Equals, 201)
-	err := json.Unmarshal(w.Body.Bytes(), response)
-
-	c.Assert(err, Equals, nil)
-
-	c.Assert(response.Data["content"], Equals, "foo")
-	c.Assert(response.Data["_id"], Equals, "540e05189b2212ee6b1f44d3")
-}
-
-func (s *TestSuite) TestCreateWithValidationErrors(c *C) {
-
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.Factory = ValidFactory
-
-	router := endpoint.GetRouter()
-	w := httptest.NewRecorder()
-
-	obj1 := map[string]string{
-		"Content": "",
+func getConnection() *bongo.Connection {
+	conf := &bongo.Config{
+		ConnectionString: "localhost",
+		Database:         "bongoz",
 	}
 
-	marshaled, err := json.Marshal(obj1)
+	conn, err := bongo.Connect(conf)
 
-	c.Assert(err, Equals, nil)
+	if err != nil {
+		panic(err)
+	}
 
-	reader := strings.NewReader(string(marshaled))
-	req, _ := http.NewRequest("POST", "/api/pages", reader)
-	router.ServeHTTP(w, req)
-
-	c.Assert(w.Code, Equals, 400)
-	c.Assert(w.Body.String(), Equals, "{\"error\":[\"Content is required\"]}")
-
+	return conn
 }
 
-// func (s *TestSuite) TestReadOneWithPassingPreFindFilter(c *C) {
-// 	filter := func(req *http.Request, q bson.M) (error, int) {
-// 		q["foo"] = "bar"
-// 		return nil, 0
-// 	}
+func TestCreate(t *testing.T) {
+	conn := getConnection()
+	defer conn.Session.Close()
 
-// 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = Factory
-// 	endpoint.PreFindFilters.ReadOne = []QueryFilter{filter}
+	Convey("POST", t, func() {
+		endpoint := NewEndpoint("/api/pages", conn, "pages")
 
-// 	router := endpoint.GetRouter()
-// 	w := httptest.NewRecorder()
+		Convey("Basic create", func() {
+			endpoint.Factory = Factory
 
-// 	// Add two
-// 	obj1 := &Page{
-// 		Content: "foo",
-// 	}
+			router := endpoint.GetRouter()
+			w := httptest.NewRecorder()
 
-// 	obj2 := &Page{
-// 		Content: "bar",
-// 	}
+			reader := strings.NewReader(`{"content":"foo","idValue":null, "_id":"540e05189b2212ee6b1f44d3"}`)
+			req, _ := http.NewRequest("POST", "/api/pages", reader)
+			router.ServeHTTP(w, req)
 
-// 	collection.Save(obj1)
-// 	collection.Save(obj2)
+			response := &singleResponse{}
+			So(w.Code, ShouldEqual, 201)
+			err := json.Unmarshal(w.Body.Bytes(), response)
 
-// 	req, _ := http.NewRequest("GET", strings.Join([]string{"/api/pages/", obj1.Id.Hex()}, ""), nil)
-// 	router.ServeHTTP(w, req)
+			So(err, ShouldEqual, nil)
 
-// 	log.Println(w.Body)
-// 	// response := &singleResponse{}
+			So(response.Data["content"], ShouldEqual, "foo")
+			So(response.Data["_id"], ShouldEqual, "540e05189b2212ee6b1f44d3")
+		})
 
-// 	c.Assert(w.Code, Equals, 404)
-// }
+		Convey("Create with validation errors", func() {
+			endpoint.Factory = ValidFactory
 
-// func (s *TestSuite) TestReadOneWithFailingPreFindFilter(c *C) {
-// 	filter := func(req *http.Request, q bson.M) (error, int) {
-// 		return errors.New("test"), 504
-// 	}
+			router := endpoint.GetRouter()
+			w := httptest.NewRecorder()
 
-// 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = Factory
-// 	endpoint.PreFindFilters.ReadOne = []QueryFilter{filter}
+			obj1 := map[string]string{
+				"Content": "",
+			}
 
-// 	router := endpoint.GetRouter()
-// 	w := httptest.NewRecorder()
+			marshaled, err := json.Marshal(obj1)
 
-// 	// Add two
-// 	obj1 := &Page{
-// 		Content: "foo",
-// 	}
+			So(err, ShouldEqual, nil)
 
-// 	obj2 := &Page{
-// 		Content: "bar",
-// 	}
+			reader := strings.NewReader(string(marshaled))
+			req, _ := http.NewRequest("POST", "/api/pages", reader)
+			router.ServeHTTP(w, req)
 
-// 	collection.Save(obj1)
-// 	collection.Save(obj2)
+			So(w.Code, ShouldEqual, 400)
+			So(w.Body.String(), ShouldEqual, "{\"errors\":[\"Content is required\"]}")
+		})
 
-// 	req, _ := http.NewRequest("GET", strings.Join([]string{"/api/pages/", obj1.Id.Hex()}, ""), nil)
-// 	router.ServeHTTP(w, req)
-
-// 	log.Println(w.Body)
-// 	// response := &singleResponse{}
-
-// 	c.Assert(w.Code, Equals, 504)
-
-// }
-
-// func (s *TestSuite) TestReadOneWithFailingPreResponseFilter(c *C) {
-// 	filter := func(req *http.Request, res *HTTPSingleResponse) (error, int) {
-// 		return errors.New("test"), 504
-// 	}
-
-// 	endpoint := NewEndpoint("/api/pages", collection)
-// 	endpoint.Factory = Factory
-// 	endpoint.PreResponseFilters.ReadOne = []SingleResponseFilter{filter}
-
-// 	router := endpoint.GetRouter()
-// 	w := httptest.NewRecorder()
-
-// 	// Add two
-// 	obj1 := &Page{
-// 		Content: "foo",
-// 	}
-
-// 	obj2 := &Page{
-// 		Content: "bar",
-// 	}
-
-// 	collection.Save(obj1)
-// 	collection.Save(obj2)
-
-// 	req, _ := http.NewRequest("GET", strings.Join([]string{"/api/pages/", obj1.Id.Hex()}, ""), nil)
-// 	router.ServeHTTP(w, req)
-
-// 	log.Println(w.Body)
-// 	// response := &singleResponse{}
-
-// 	c.Assert(w.Code, Equals, 504)
-
-// }
+		Reset(func() {
+			conn.Session.DB("bongoz").DropDatabase()
+		})
+	})
+}

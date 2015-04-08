@@ -1,21 +1,13 @@
-package bongoz
+package restserver
 
 import (
-	// "fmt"
+	"encoding/json"
 	"github.com/justinas/alice"
 	"github.com/maxwellhealth/bongo"
-	. "gopkg.in/check.v1"
-	// "io/ioutil"
-	"encoding/json"
-	"errors"
-	"github.com/maxwellhealth/mgo/bson"
-	// "log"
+	. "github.com/smartystreets/goconvey/convey"
 	"net/http"
 	"net/http/httptest"
-	// "net/url"
-	// "strings"
-	// "time"
-	// "testing"
+	"testing"
 )
 
 type listResponse struct {
@@ -23,189 +15,109 @@ type listResponse struct {
 	Data       []map[string]interface{}
 }
 
-func (s *TestSuite) TestReadList(c *C) {
+func TestReadList(t *testing.T) {
+	conn := getConnection()
+	collection := conn.Collection("pages")
+	defer conn.Session.Close()
 
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.Factory = Factory
+	Convey("ReadList", t, func() {
+		endpoint := NewEndpoint("/api/pages", conn, "pages")
+		Convey("basic readlist", func() {
+			endpoint.Factory = Factory
 
-	router := endpoint.GetRouter()
-	w := httptest.NewRecorder()
+			router := endpoint.GetRouter()
+			w := httptest.NewRecorder()
 
-	// Add two
-	obj1 := &Page{
-		Content: "foo",
-	}
+			// Add two
+			obj1 := &Page{
+				Content: "foo",
+			}
 
-	obj2 := &Page{
-		Content: "bar",
-	}
+			obj2 := &Page{
+				Content: "bar",
+			}
 
-	res := collection.Save(obj1)
-	c.Assert(res.Success, Equals, true)
-	res = collection.Save(obj2)
-	c.Assert(res.Success, Equals, true)
+			err := collection.Save(obj1)
+			So(err, ShouldEqual, nil)
+			err = collection.Save(obj2)
+			So(err, ShouldEqual, nil)
 
-	req, _ := http.NewRequest("GET", "/api/pages", nil)
-	router.ServeHTTP(w, req)
+			req, _ := http.NewRequest("GET", "/api/pages", nil)
+			router.ServeHTTP(w, req)
 
-	response := &listResponse{}
+			response := &listResponse{}
 
-	err := json.Unmarshal(w.Body.Bytes(), response)
+			err = json.Unmarshal(w.Body.Bytes(), response)
 
-	c.Assert(err, Equals, nil)
-	c.Assert(response.Pagination.Current, Equals, 1)
-	c.Assert(response.Pagination.TotalPages, Equals, 1)
-	c.Assert(response.Pagination.RecordsOnPage, Equals, 2)
-	c.Assert(len(response.Data), Equals, 2)
+			So(err, ShouldEqual, nil)
+			So(response.Pagination.Current, ShouldEqual, 1)
+			So(response.Pagination.TotalPages, ShouldEqual, 1)
+			So(response.Pagination.RecordsOnPage, ShouldEqual, 2)
+			So(len(response.Data), ShouldEqual, 2)
+		})
+		Convey("with query", func() {
+			endpoint.Factory = Factory
+			endpoint.AllowFullQuery = true
+			router := endpoint.GetRouter()
+			w := httptest.NewRecorder()
 
-}
+			// Add two
+			obj1 := &Page{
+				Content: "foo",
+			}
 
-func (s *TestSuite) TestReadListWithMiddleware(c *C) {
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.Factory = Factory
+			obj2 := &Page{
+				Content: "bar",
+			}
 
-	endpoint.Middleware.ReadList = alice.New(errorMiddleware)
+			err := collection.Save(obj1)
+			So(err, ShouldEqual, nil)
+			err = collection.Save(obj2)
+			So(err, ShouldEqual, nil)
 
-	router := endpoint.GetRouter()
-	w := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", `/api/pages?_query={"content":{"$regex":"OO","$options":"i"}}`, nil)
+			router.ServeHTTP(w, req)
 
-	req, _ := http.NewRequest("GET", "/api/pages", nil)
-	router.ServeHTTP(w, req)
+			response := &listResponse{}
 
-	c.Assert(w.Code, Equals, 401)
-	c.Assert(w.Body.String(), Equals, "Not Authorized\n")
+			err = json.Unmarshal(w.Body.Bytes(), response)
 
-}
+			So(err, ShouldEqual, nil)
+			So(response.Pagination.Current, ShouldEqual, 1)
+			So(response.Pagination.TotalPages, ShouldEqual, 1)
+			So(response.Pagination.RecordsOnPage, ShouldEqual, 1)
+			So(len(response.Data), ShouldEqual, 1)
+		})
+		Convey("readlist with middleware", func() {
+			endpoint.Factory = Factory
 
-func (s *TestSuite) TestReadListWithFailingPreFindFilter(c *C) {
+			endpoint.Middleware.ReadList = alice.New(errorMiddleware)
 
-	filter := func(req *http.Request, method string, q bson.M) (error, int) {
-		return errors.New("foo"), 503
-	}
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.Factory = Factory
+			router := endpoint.GetRouter()
+			w := httptest.NewRecorder()
 
-	endpoint.PreFindFilters = []QueryFilter{filter}
-	router := endpoint.GetRouter()
-	w := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", "/api/pages", nil)
+			router.ServeHTTP(w, req)
 
-	req, _ := http.NewRequest("GET", "/api/pages", nil)
-	router.ServeHTTP(w, req)
+			So(w.Code, ShouldEqual, 401)
+			So(w.Body.String(), ShouldEqual, "Not Authorized\n")
+		})
+		Reset(func() {
+			conn.Session.DB("bongoz").DropDatabase()
 
-	c.Assert(w.Code, Equals, 503)
-	c.Assert(w.Body.String(), Equals, "{\"error\":\"foo\"}")
-}
-
-func (s *TestSuite) TestReadListWithPassingPreFindFilter(c *C) {
-
-	filter := func(req *http.Request, method string, q bson.M) (error, int) {
-		q["content"] = "foo"
-		return nil, 0
-	}
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.Factory = Factory
-
-	endpoint.PreFindFilters = []QueryFilter{filter}
-	router := endpoint.GetRouter()
-	w := httptest.NewRecorder()
-
-	// Add two
-	obj1 := &Page{
-		Content: "foo",
-	}
-
-	obj2 := &Page{
-		Content: "bar",
-	}
-
-	collection.Save(obj1)
-	collection.Save(obj2)
-
-	req, _ := http.NewRequest("GET", "/api/pages", nil)
-	router.ServeHTTP(w, req)
-
-	response := &listResponse{}
-
-	err := json.Unmarshal(w.Body.Bytes(), response)
-
-	c.Assert(err, Equals, nil)
-
-	c.Assert(response.Pagination.Current, Equals, 1)
-	c.Assert(response.Pagination.TotalPages, Equals, 1)
-	c.Assert(response.Pagination.RecordsOnPage, Equals, 1)
-	c.Assert(len(response.Data), Equals, 1)
-	// log.Println(response.Data)
-	c.Assert(response.Data[0]["content"], Equals, "foo")
-}
-
-func (s *TestSuite) TestReadListWithMultiplePreFindFilters(c *C) {
-
-	filter := func(req *http.Request, method string, q bson.M) (error, int) {
-		q["content"] = "foo"
-		return nil, 0
-	}
-
-	filter2 := func(req *http.Request, method string, q bson.M) (error, int) {
-		q["bing"] = "baz"
-		return nil, 0
-	}
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.Factory = Factory
-
-	endpoint.PreFindFilters = []QueryFilter{filter, filter2}
-	router := endpoint.GetRouter()
-	w := httptest.NewRecorder()
-
-	// Add two
-	obj1 := &Page{
-		Content: "foo",
-	}
-
-	obj2 := &Page{
-		Content: "bar",
-	}
-
-	collection.Save(obj1)
-	collection.Save(obj2)
-
-	req, _ := http.NewRequest("GET", "/api/pages", nil)
-	router.ServeHTTP(w, req)
-
-	response := &listResponse{}
-
-	err := json.Unmarshal(w.Body.Bytes(), response)
-
-	c.Assert(err, Equals, nil)
-
-	c.Assert(response.Pagination.Current, Equals, 0)
-	c.Assert(response.Pagination.TotalPages, Equals, 0)
-	c.Assert(response.Pagination.RecordsOnPage, Equals, 0)
-	c.Assert(len(response.Data), Equals, 0)
-	// log.Println(response.Data)
-	// c.Assert(response.Data[0]["Content"], Equals, "foo")
-}
-
-func (s *TestSuite) TestReadListWithFailingPreResponseFilter(c *C) {
-
-	filter := func(req *http.Request, r *HTTPListResponse) (error, int) {
-		return errors.New("bar"), 504
-	}
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.Factory = Factory
-
-	endpoint.PreResponseListFilters = []ListResponseFilter{filter}
-	router := endpoint.GetRouter()
-	w := httptest.NewRecorder()
-
-	req, _ := http.NewRequest("GET", "/api/pages", nil)
-	router.ServeHTTP(w, req)
-
-	c.Assert(w.Code, Equals, 504)
-	c.Assert(w.Body.String(), Equals, "{\"error\":\"bar\"}")
+		})
+	})
 }
 
 // Serve a collection of 50 elements
-func (s *TestSuite) BenchmarkReadList(c *C) {
+func BenchmarkReadList(b *testing.B) {
+
+	conn := getConnection()
+	collection := conn.Collection("pages")
+	defer func() {
+		conn.Session.DB("dpltest").DropDatabase()
+		conn.Session.Close()
+	}()
 
 	doRequest := func(e *Endpoint) {
 		router := e.GetRouter()
@@ -214,7 +126,7 @@ func (s *TestSuite) BenchmarkReadList(c *C) {
 		router.ServeHTTP(w, req)
 	}
 
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
+	endpoint := NewEndpoint("/api/pages", conn, "pages")
 	endpoint.Factory = Factory
 
 	for n := 0; n < 50; n++ {
@@ -224,9 +136,9 @@ func (s *TestSuite) BenchmarkReadList(c *C) {
 		collection.Save(obj)
 	}
 
-	c.ResetTimer()
+	b.ResetTimer()
 
-	for i := 0; i < c.N; i++ {
+	for i := 0; i < b.N; i++ {
 		doRequest(endpoint)
 	}
 }

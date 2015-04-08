@@ -1,4 +1,4 @@
-package bongoz
+package restserver
 
 import (
 	"errors"

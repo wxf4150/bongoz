@@ -1,27 +1,18 @@
-package bongoz
+package restserver
 
 import (
+	"errors"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
 	"github.com/maxwellhealth/bongo"
-	"github.com/maxwellhealth/bongoz/json"
-	"github.com/maxwellhealth/mgo/bson"
-	"github.com/oleiade/reflections"
+	"github.com/maxwellhealth/go-enhanced-json"
+	"gopkg.in/mgo.v2/bson"
 	"io"
-	// "labix.org/v2/mgo/bson"
-	"errors"
-	"log"
 	"net/http"
-	"time"
-	// "net/url"
-	// "reflect"
-	// "strconv"
-	"reflect"
 	"strconv"
 	"strings"
-	// "time"
-	"fmt"
-	"io/ioutil"
+	"time"
 )
 
 type SortConfig struct {
@@ -34,17 +25,6 @@ type PaginationConfig struct {
 	Sort    []SortConfig
 }
 
-type QueryFilter func(*http.Request, string, bson.M) (error, int)
-type DocumentFilter func(*http.Request, string, interface{}) (error, int)
-type ListResponseFilter func(*http.Request, *HTTPListResponse) (error, int)
-type SingleResponseFilter func(*http.Request, string, *HTTPSingleResponse) (error, int)
-type PostWriteResponseHook func(*http.Request, string, interface{})
-type PostReadResponseHook func(*http.Request, string)
-type CollectionNameFilter func(*http.Request, string) string
-
-// Use this to inspect the request body, for signature-based security, etc
-type PreServeFilter func(*http.Request, []byte) (error, int)
-
 type HTTPListResponse struct {
 	Pagination *bongo.PaginationInfo
 	Data       []interface{}
@@ -55,24 +35,26 @@ type HTTPSingleResponse struct {
 }
 
 type HTTPErrorResponse struct {
-	Error error
+	Errors []error
 }
 
 func NewErrorResponse(err error) *HTTPErrorResponse {
-	return &HTTPErrorResponse{err}
+
+	return &HTTPErrorResponse{[]error{err}}
 }
 
 func (e *HTTPErrorResponse) ToJSON() string {
 
-	if reflect.TypeOf(e.Error).String() != "*bongo.SaveResult" {
-		m := make(map[string]string)
-		m["error"] = e.Error.Error()
-		marshaled, _ := json.Marshal(m)
-		return string(marshaled)
-	} else {
-		marshaled, _ := json.Marshal(e)
-		return string(marshaled)
+	errs := make([]string, len(e.Errors))
+	for i, err := range e.Errors {
+		errs[i] = err.Error()
 	}
+	mp := map[string]interface{}{
+		"errors": errs,
+	}
+
+	marshaled, _ := json.Marshal(mp)
+	return string(marshaled)
 
 }
 
@@ -95,7 +77,7 @@ func (e *HTTPMultiErrorResponse) ToJSON() string {
 	return string(marshaled)
 }
 
-type ModelFactory func() interface{}
+type ModelFactory func() bongo.Document
 
 type Middleware struct {
 	ReadOne  alice.Chain
@@ -106,25 +88,16 @@ type Middleware struct {
 }
 
 type Endpoint struct {
-	CollectionName           string
-	Connection               *bongo.Connection
-	Uri                      string
-	QueryParams              []string
-	Pagination               *PaginationConfig
-	PreServeFilters          []PreServeFilter
-	PreFindFilters           []QueryFilter
-	PreSaveFilters           []DocumentFilter
-	PostRetrieveFilters      []DocumentFilter
-	PreResponseListFilters   []ListResponseFilter
-	PreResponseSingleFilters []SingleResponseFilter
-	PostWriteResponseHooks   []PostWriteResponseHook
-	PostReadResponseHooks    []PostReadResponseHook
-	CollectionNameFilters    []CollectionNameFilter
-	Factory                  ModelFactory
-	Middleware               *Middleware
-	SoftDelete               bool
-	AllowFullQuery           bool
-	DisableWrites            bool
+	CollectionName string
+	Connection     *bongo.Connection
+	Uri            string
+	QueryParams    []string
+	Pagination     *PaginationConfig
+	Factory        ModelFactory
+	Middleware     *Middleware
+
+	AllowFullQuery bool
+	DisableWrites  bool
 }
 
 func NewEndpoint(uri string, connection *bongo.Connection, collectionName string) *Endpoint {
@@ -136,41 +109,6 @@ func NewEndpoint(uri string, connection *bongo.Connection, collectionName string
 	endpoint.Middleware = new(Middleware)
 	return endpoint
 }
-
-// func (e *Endpoint) PreFind(method string, filter QueryFilter) *Endpoint {
-// 	methods := methodsFromMethod(method)
-// 	for _, m := range methods {
-// 		e.PreFilterHooks[m] = append(e.PreFilterHooks[m], hook)
-// 	}
-
-// 	return e
-
-// }
-
-// func (e *Endpoint) PreSave(method string, hook documentFilter) *Endpoint {
-// 	methods := methodsFromMethod(method)
-// 	for _, m := range methods {
-// 		e.PreSaveHooks[m] = append(e.PreSaveHooks[m], hook)
-// 	}
-// 	return e
-// }
-
-// func (e *Endpoint) PostRetrieve(method string, hook documentFilter) *Endpoint {
-// 	methods := methodsFromMethod(method)
-// 	for _, m := range methods {
-// 		e.PostRetrieveHooks[m] = append(e.PostRetrieveHooks[m], hook)
-// 	}
-
-// 	return e
-// }
-
-// func (e *Endpoint) PreResponse(method string, hook responseFilter) *Endpoint {
-// 	methods := methodsFromMethod(method)
-// 	for _, m := range methods {
-// 		e.PreResponseHooks[m] = append(e.PreResponseHooks[m], hook)
-// 	}
-// 	return e
-// }
 
 func methodsFromMethod(method string) []string {
 	if method == "*" || method == "all" {
@@ -198,6 +136,7 @@ func (e *Endpoint) SetMiddleware(method string, chain alice.Chain) *Endpoint {
 			e.Middleware.Update = chain
 		case "Delete":
 			e.Middleware.Delete = chain
+
 		}
 	}
 	return e
@@ -215,12 +154,13 @@ func (e *Endpoint) GetRouter() *mux.Router {
 
 func (e *Endpoint) registerRoutes(r *mux.Router) {
 	r.Handle(e.Uri, e.Middleware.ReadList.ThenFunc(e.HandleReadList)).Methods("GET")
-	r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.ReadOne.ThenFunc(e.HandleReadOne)).Methods("GET")
+	r.Handle(e.Uri+"/{id}", e.Middleware.ReadOne.ThenFunc(e.HandleReadOne)).Methods("GET")
 
 	if !e.DisableWrites {
 		r.Handle(e.Uri, e.Middleware.Create.ThenFunc(e.HandleCreate)).Methods("POST")
-		r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Update.ThenFunc(e.HandleUpdate)).Methods("PUT")
-		r.Handle(strings.Join([]string{e.Uri, "{id}"}, "/"), e.Middleware.Delete.ThenFunc(e.HandleDelete)).Methods("DELETE")
+
+		r.Handle(e.Uri+"/{id}", e.Middleware.Update.ThenFunc(e.HandleUpdate)).Methods("PUT")
+		r.Handle(e.Uri+"/{id}", e.Middleware.Delete.ThenFunc(e.HandleDelete)).Methods("DELETE")
 	}
 
 }
@@ -255,67 +195,26 @@ func handleError(w http.ResponseWriter) {
 
 // Handle a "ReadList" request, including parsing pagination, query string, etc
 func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
-	// defer handleError(w)
+	defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
 	var err error
 	var code int
 
-	body := []byte{}
-	for _, f := range e.PreServeFilters {
-		err, code = f(req, body)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	start := time.Now()
 	// Get the query
 	query, err := e.getQuery(req)
 
 	if err != nil {
 		w.WriteHeader(code)
 		io.WriteString(w, NewErrorResponse(err).ToJSON())
+
 		return
 	}
 
-	// Run pre filters for readList
-	for _, f := range e.PreFindFilters {
-		err, code = f(req, "readList", query)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
+	connection := e.Connection
 
-	collectionName := e.CollectionName
-	// Pass collection name through filters
-	for _, f := range e.CollectionNameFilters {
-		collectionName = f(req, collectionName)
-	}
+	results := connection.Collection(e.CollectionName).Find(query)
 
-	response := make([]interface{}, 0)
-	results := e.Connection.Collection(collectionName).Find(query)
-
-	// for i := 0; i < 50; i++ {
-	// 	res := e.Factory()
-	// 	results.Next(res)
-	// 	response = append(response, res)
-	// }
+	defer results.Free()
 
 	// Default pagination is 50
 	if e.Pagination.PerPage == 0 {
@@ -335,24 +234,33 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 	limitParam := req.URL.Query().Get("_limit")
 	skipParam := req.URL.Query().Get("_skip")
 
+	paginate := true
+
 	if len(limitParam) > 0 {
+		paginate = false
 		converted, err := strconv.Atoi(limitParam)
-		// Hard limit to 500 so people can break it
+
 		if err == nil && converted > 0 {
 			limit = converted
 		}
 	}
 
 	if len(skipParam) > 0 {
-		converted, err := strconv.Atoi(skipParam)
 
+		converted, err := strconv.Atoi(skipParam)
+		paginate = false
 		if err == nil && converted >= 0 {
 			skip = converted
 		}
 	}
 
+	var pageInfo *bongo.PaginationInfo
+
 	if limit > 0 {
 		results.Query.Limit(limit).Skip(skip)
+		pageInfo = &bongo.PaginationInfo{}
+		pageInfo.TotalPages = 1
+		pageInfo.Current = 1
 	}
 
 	if len(perPageParam) > 0 {
@@ -371,65 +279,51 @@ func (e *Endpoint) HandleReadList(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	pageInfo, err := results.Paginate(perPage, page)
+	var total int
+	if paginate {
+		pageInfo, err = results.Paginate(perPage, page)
+		if err != nil {
+			panic(err)
+		}
 
-	if err != nil {
-		panic(err)
+		total = pageInfo.RecordsOnPage
+
+	} else {
+		total, err = results.Query.Count()
+		if err != nil {
+			panic(err)
+		}
+
+		pageInfo.RecordsOnPage = total
+		pageInfo.TotalRecords = total
+		pageInfo.PerPage = total
+		if total == 0 {
+			pageInfo.TotalPages = 0
+		}
 	}
 
 	sortParam := req.URL.Query().Get("_sort")
-
 	if len(sortParam) > 0 {
 		sortFields := strings.Split(sortParam, ",")
 		results.Query.Sort(sortFields...)
 	}
 
-	// res := e.Factory.New()
-
-	for i := 0; i < pageInfo.RecordsOnPage; i++ {
+	response := make([]interface{}, total)
+	for i := 0; i < total; i++ {
 		res := e.Factory()
 		results.Next(res)
-
-		response = append(response, res)
+		response[i] = res
 
 	}
 
 	httpResponse := &HTTPListResponse{pageInfo, response}
 
-	// Filters can modify the response and optionally return a non-nil error, in which case the server's response will be a new
-	// HTTP error with the provided error code. Code defaults to 500 if zero (not set)
-	for _, f := range e.PreResponseListFilters {
-		err, code = f(req, httpResponse)
-		if err != nil {
-			break
-		}
-	}
-
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	marshaled, err := json.Marshal(httpResponse)
+	encoder := json.NewEncoder(w)
+	err = encoder.Encode(httpResponse)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	io.WriteString(w, string(marshaled))
-
-	elapsed := time.Since(start)
-	log.Printf("Request took %s", elapsed)
-
-	// Run post response
-	for _, f := range e.PostReadResponseHooks {
-		f(req, "readList")
 	}
 }
 
@@ -438,25 +332,7 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var err error
-	var code int
-	body := []byte{}
 
-	for _, f := range e.PreServeFilters {
-		err, code = f(req, body)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	start := time.Now()
 	// Step 1 - make sure provided ID is a valid mongo id hex
 	vars := mux.Vars(req)
 
@@ -467,39 +343,10 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	query := bson.M{
-		"_id": bson.ObjectIdHex(id),
-	}
-
-	// Run it through the filters
-	for _, f := range e.PreFindFilters {
-		err, code = f(req, "readOne", query)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
 	// Execute the find
 	instance := e.Factory()
 
-	collectionName := e.CollectionName
-	// Pass collection name through filters
-	for _, f := range e.CollectionNameFilters {
-		collectionName = f(req, collectionName)
-	}
-
-	// Use a FindOne instead of FindById since the query filters may need
-	// to add additional parameters to the search query, aside from just ID.
-	// Error here is just if there is no document
-	err = e.Connection.Collection(collectionName).FindOne(query, instance)
+	err = e.Connection.Collection(e.CollectionName).FindById(bson.ObjectIdHex(id), instance)
 
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -509,68 +356,25 @@ func (e *Endpoint) HandleReadOne(w http.ResponseWriter, req *http.Request) {
 
 	httpResponse := &HTTPSingleResponse{instance}
 
-	// Run pre response filters
-	for _, f := range e.PreResponseSingleFilters {
-		err, code = f(req, "readOne", httpResponse)
-		if err != nil {
-			break
-		}
-	}
+	encoder := json.NewEncoder(w)
+	err = encoder.Encode(httpResponse)
 
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	marshaled, err := json.Marshal(httpResponse)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
 	}
-
-	io.WriteString(w, string(marshaled))
-	elapsed := time.Since(start)
-	log.Printf("Request took %s", elapsed)
-
-	// Run post response
-	for _, f := range e.PostReadResponseHooks {
-		f(req, "readOne")
-	}
-
 }
 
 func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
 
-	start := time.Now()
 	w.Header().Set("Content-Type", "application/json")
 
 	var err error
-	var code int
-	body, err := ioutil.ReadAll(req.Body)
-	for _, f := range e.PreServeFilters {
-		err, code = f(req, body)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
 
 	// start := time.Now()
 
-	// decoder := json.NewDecoder(req.Body)
+	decoder := json.NewDecoder(req.Body)
 
 	obj := e.Factory()
 
@@ -579,109 +383,53 @@ func (e *Endpoint) HandleCreate(w http.ResponseWriter, req *http.Request) {
 		trackable.GetDiffTracker().Reset()
 	}
 
-	errs := json.Unmarshal(body, obj)
-
-	if len(errs) > 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, NewMultiErrorResponse(errs).ToJSON())
-		return
-	}
-	// if err != nil {
-	// 	http.Error(w, err.Error(), http.StatusBadRequest)
-	// 	return
-	// }
-
-	// Run pre save filters
-	for _, f := range e.PreSaveFilters {
-		err, code = f(req, "create", obj)
-		if err != nil {
-			break
-		}
-	}
+	err = decoder.Decode(obj)
 
 	if err != nil {
+		if merr, ok := err.(*json.MultipleUnmarshalTypeError); ok {
 
-		if code <= 0 {
-			code = http.StatusInternalServerError
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, NewMultiErrorResponse(merr.Errors).ToJSON())
+			return
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			io.WriteString(w, NewErrorResponse(err).ToJSON())
+			return
 		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
+
 	}
 
-	collectionName := e.CollectionName
-	// Pass collection name through filters
-	for _, f := range e.CollectionNameFilters {
-		collectionName = f(req, collectionName)
-	}
+	err = e.Connection.Collection(e.CollectionName).Save(obj)
 
-	result := e.Connection.Collection(collectionName).Save(obj)
-
-	if result.Success == false {
-		// Make a new JSON e
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, NewErrorResponse(result).ToJSON())
+	if err != nil {
+		if verr, ok := err.(*bongo.ValidationError); ok {
+			w.WriteHeader(http.StatusBadRequest)
+			errResponse := &HTTPErrorResponse{verr.Errors}
+			io.WriteString(w, errResponse.ToJSON())
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			io.WriteString(w, NewErrorResponse(err).ToJSON())
+		}
 		return
 	}
 
 	httpResponse := &HTTPSingleResponse{obj}
 
-	// Run pre response filters
-	for _, f := range e.PreResponseSingleFilters {
-		err, code = f(req, "create", httpResponse)
-		if err != nil {
-			break
-		}
-	}
+	encoder := json.NewEncoder(w)
+	w.WriteHeader(http.StatusCreated)
+	err = encoder.Encode(httpResponse)
 
 	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
+		panic(err)
 	}
 
-	marshaled, _ := json.Marshal(httpResponse)
-
-	w.WriteHeader(http.StatusCreated)
-	io.WriteString(w, string(marshaled))
-	// elapsed := time.Since(start)
-
-	elapsed := time.Since(start)
-	log.Printf("Request took %s", elapsed)
-	// Run post response
-	go func() {
-		for _, f := range e.PostWriteResponseHooks {
-			f(req, "create", obj)
-		}
-	}()
 }
 
 func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
 	w.Header().Set("Content-Type", "application/json")
-	start := time.Now()
 
 	var err error
-	var code int
-	body, err := ioutil.ReadAll(req.Body)
-
-	for _, f := range e.PreServeFilters {
-		err, code = f(req, body)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
 
 	vars := mux.Vars(req)
 
@@ -693,57 +441,12 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	query := bson.M{
-		"_id": bson.ObjectIdHex(id),
-	}
-
-	// Run it through the filters
-	for _, f := range e.PreFindFilters {
-		err, code = f(req, "update", query)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	collectionName := e.CollectionName
-	// Pass collection name through filters
-	for _, f := range e.CollectionNameFilters {
-		collectionName = f(req, collectionName)
-	}
-
 	// Execute the find
 	instance := e.Factory()
 
-	// Use a FindOne instead of FindById since the query filters may need
-	// to add additional parameters to the search query, aside from just ID.
-	// Error here is just if there is no document
-
-	err = e.Connection.Collection(collectionName).FindOne(query, instance)
+	err = e.Connection.Collection(e.CollectionName).FindById(bson.ObjectIdHex(id), instance)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	for _, f := range e.PostRetrieveFilters {
-		err, code = f(req, "update", instance)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
 		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
@@ -753,135 +456,68 @@ func (e *Endpoint) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Save the ID and reapply it afterward, so we do not allow the http request to modify the ID
-	actualId, _ := reflections.GetField(instance, "Id")
+	actualId := instance.GetId()
 
-	errs := json.Unmarshal(body, instance)
-	if len(errs) > 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, NewMultiErrorResponse(errs).ToJSON())
-		return
-	}
-
-	reflections.SetField(instance, "Id", actualId)
-
-	// Run pre save filters
-	for _, f := range e.PreSaveFilters {
-		err, code = f(req, "update", instance)
-		if err != nil {
-			break
-		}
-	}
+	decoder := json.NewDecoder(req.Body)
+	err = decoder.Decode(instance)
 
 	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
+		if merr, ok := err.(*json.MultipleUnmarshalTypeError); ok {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, NewMultiErrorResponse(merr.Errors).ToJSON())
+			return
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			io.WriteString(w, NewErrorResponse(err).ToJSON())
+			return
 		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
+
 	}
 
-	result := e.Connection.Collection(collectionName).Save(instance)
+	instance.SetId(actualId)
 
-	if result.Success == false {
-		// Make a new JSON e
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, NewErrorResponse(result).ToJSON())
+	if tt, ok := instance.(bongo.TimeTracker); ok {
+		tt.SetModified(time.Now())
+	}
+
+	err = e.Connection.Collection(e.CollectionName).Save(instance)
+
+	if err != nil {
+		if verr, ok := err.(*bongo.ValidationError); ok {
+			w.WriteHeader(http.StatusBadRequest)
+			errResponse := &HTTPErrorResponse{verr.Errors}
+			io.WriteString(w, errResponse.ToJSON())
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			io.WriteString(w, NewErrorResponse(err).ToJSON())
+		}
 		return
 	}
 
 	httpResponse := &HTTPSingleResponse{instance}
 
-	// Run pre response filters
-	for _, f := range e.PreResponseSingleFilters {
-		err, code = f(req, "update", httpResponse)
-		if err != nil {
-			break
-		}
-	}
+	encoder := json.NewEncoder(w)
+	err = encoder.Encode(httpResponse)
 
 	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
+		panic(err)
 	}
 
-	marshaled, _ := json.Marshal(httpResponse)
-
-	io.WriteString(w, string(marshaled))
-	elapsed := time.Since(start)
-	log.Printf("Request took %s", elapsed)
-
-	// Run post response
-	go func() {
-		for _, f := range e.PostWriteResponseHooks {
-			f(req, "update", instance)
-		}
-	}()
 }
 
 func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	defer handleError(w)
 
 	var err error
-	var code int
-	body := []byte{}
-
-	for _, f := range e.PreServeFilters {
-		err, code = f(req, body)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	collectionName := e.CollectionName
-	// Pass collection name through filters
-	for _, f := range e.CollectionNameFilters {
-		collectionName = f(req, collectionName)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	start := time.Now()
 
 	vars := mux.Vars(req)
 
 	id := vars["id"]
 
 	if len(id) == 0 || !bson.IsObjectIdHex(id) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		io.WriteString(w, NewErrorResponse(errors.New("Invalid Object ID")).ToJSON())
-		return
-	}
-
-	query := bson.M{
-		"_id": bson.ObjectIdHex(id),
-	}
-
-	// Run it through the filters
-	for _, f := range e.PreFindFilters {
-		err, code = f(req, "update", query)
-		if err != nil {
-			break
-		}
-	}
-
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
@@ -891,55 +527,24 @@ func (e *Endpoint) HandleDelete(w http.ResponseWriter, req *http.Request) {
 	// Use a FindOne instead of FindById since the query filters may need
 	// to add additional parameters to the search query, aside from just ID.
 	// Error here is just if there is no document
+	collection := e.Connection.Collection(e.CollectionName)
 
-	err = e.Connection.Collection(collectionName).FindOne(query, instance)
+	err = collection.FindById(bson.ObjectIdHex(id), instance)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
 
-	for _, f := range e.PostRetrieveFilters {
-		err, code = f(req, "delete", instance)
-		if err != nil {
-			break
-		}
-	}
-	if err != nil {
-		if code <= 0 {
-			code = http.StatusInternalServerError
-		}
-		w.WriteHeader(code)
-		io.WriteString(w, NewErrorResponse(err).ToJSON())
-		return
-	}
-
-	collection := e.Connection.Collection(collectionName)
-	if e.SoftDelete {
-		// Prepare for save but save in diff collection
-		prepared := collection.PrepDocumentForSave(instance)
-
-		e.Connection.Collection(strings.Join([]string{collection.Name, "deleted"}, "_")).Collection().UpsertId(prepared["_id"], prepared)
-
-	}
-	err = e.Connection.Collection(collectionName).Delete(instance)
+	err = collection.DeleteDocument(instance)
 
 	if err != nil {
 		// Make a new JSON e
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		io.WriteString(w, NewErrorResponse(err).ToJSON())
 		return
 	}
-
-	io.WriteString(w, "OK")
-	elapsed := time.Since(start)
-	log.Printf("Request took %s", elapsed)
-
-	// Run post response
-	go func() {
-		for _, f := range e.PostWriteResponseHooks {
-			f(req, "delete", instance)
-		}
-	}()
 
 }

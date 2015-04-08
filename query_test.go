@@ -1,88 +1,33 @@
-package bongoz
+package restserver
 
 import (
+	// "encoding/base64"
 	"encoding/json"
-	"github.com/maxwellhealth/mgo/bson"
-	. "gopkg.in/check.v1"
-	"log"
+	. "github.com/smartystreets/goconvey/convey"
 	"net/http"
 	"net/url"
-	"reflect"
-	"strings"
-	"time"
+	"testing"
+	// "time"
 )
 
-func testQuery(testCase *queryTestCase, c *C) {
-	var combined string
-	if len(testCase.queryString) > 0 {
-		combined = strings.Join([]string{"http://localhost:8000?", testCase.queryString}, "")
-	} else {
-		combined = strings.Join([]string{"http://localhost:8000?", testCase.param, "=", testCase.value}, "")
-	}
-	parsed, _ := url.Parse(combined)
+func TestQuery(t *testing.T) {
+	conn := getConnection()
+	defer conn.Session.Close()
 
-	log.Println("Checking URL: ", parsed)
-	request := &http.Request{
-		URL: parsed,
-	}
+	Convey("Query parsing", t, func() {
+		parsed, _ := url.Parse(`http://localhost:8000?_query={"_id":{"$oid":"5525444a91692844dbfef192"}}`)
+		// parsed, _ := url.Parse(`http://localhost:8000?_query=HgAAAANkYXRlABMAAAAJJGd0ZQDb7bVmSwEAAAAA`)
 
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.QueryParams = []string{testCase.param}
-	endpoint.Factory = Factory
-	query, _ := endpoint.getQuery(request)
+		request := &http.Request{
+			URL: parsed,
+		}
 
-	c.Assert(query, JSONEquals, testCase.match)
+		endpoint := NewEndpoint("/api/pages", conn, "pages")
+		endpoint.AllowFullQuery = true
+		query, _ := endpoint.getQuery(request)
 
-	if testCase.matchType {
-		t1 := reflect.TypeOf(query[testCase.param])
-		t2 := reflect.TypeOf(testCase.matchTypeTo)
-
-		c.Assert(t1, Equals, t2)
-	}
-}
-
-type queryTestCase struct {
-	queryString string
-	param       string
-	value       string
-	match       bson.M
-	matchType   bool
-	matchTypeTo interface{}
-}
-
-func (s *TestSuite) TestQueryGeneration(c *C) {
-
-	objId := bson.NewObjectId()
-
-	// log.Println(objId.String())
-	objId2 := bson.NewObjectId()
-
-	cases := []*queryTestCase{
-		&queryTestCase{"", "$regexi_content", "f", bson.M{"content": bson.M{"$regex": bson.RegEx{"f", "i"}}}, false, nil},
-		&queryTestCase{"", "$regex_content", "f", bson.M{"content": bson.M{"$regex": bson.RegEx{"f", ""}}}, false, nil},
-		&queryTestCase{"", "$gte_intvalue", "5", bson.M{"intvalue": bson.M{"$gte": 5}}, false, nil},
-		&queryTestCase{"", "idvalue", objId.Hex(), bson.M{"idvalue": objId}, true, objId},
-		&queryTestCase{strings.Join([]string{"$in_idarr=", objId.Hex(), "&$in_idarr=", objId2.Hex()}, ""), "$in_idarr", "", bson.M{"idarr": bson.M{"$in": []bson.ObjectId{objId, objId2}}}, false, nil},
-		&queryTestCase{"", "$lt_datevalue", "12345", bson.M{"datevalue": bson.M{"$lt": time.Unix(12345, 0)}}, false, nil},
-	}
-
-	for _, testCase := range cases {
-		testQuery(testCase, c)
-	}
-}
-
-func (s *TestSuite) TestFullQuery(c *C) {
-	parsed, _ := url.Parse(`http://localhost:8000?query={"_id":{"$oid":12345}}`)
-
-	log.Println("Checking URL: ", parsed)
-	request := &http.Request{
-		URL: parsed,
-	}
-
-	endpoint := NewEndpoint("/api/pages", connection, "pages")
-	endpoint.AllowFullQuery = true
-	query, _ := endpoint.getQuery(request)
-
-	marshaled, _ := json.Marshal(query)
-	c.Assert(string(marshaled), Equals, `{"_id":{"$oid":12345}}`)
+		// log.Println(query)
+		marshaled, _ := json.Marshal(query)
+		So(string(marshaled), ShouldEqual, `{"_id":{"$oid":"5525444a91692844dbfef192"}}`)
+	})
 }

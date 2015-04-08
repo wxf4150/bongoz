@@ -1,36 +1,16 @@
-package bongoz
+package restserver
 
 import (
+	"github.com/DailyFeats/dpl/models/traits"
+
 	"github.com/maxwellhealth/bongo"
 	"github.com/maxwellhealth/mgo/bson"
-	. "gopkg.in/check.v1"
-	"log"
 	"net/http"
 	"time"
 	// "net/url"
-	"encoding/json"
-
-	"testing"
+	"errors"
+	"reflect"
 )
-
-// Hook up gocheck into the "go test" runner.
-func Test(t *testing.T) { TestingT(t) }
-
-type TestSuite struct{}
-
-var _ = Suite(&TestSuite{})
-
-type NullWriter int
-
-func (NullWriter) Write([]byte) (int, error) { return 0, nil }
-
-func (s *TestSuite) SetUpTest(c *C) {
-	connection.Session.DB(config.Database).DropDatabase()
-	if !testing.Verbose() {
-		log.SetOutput(new(NullWriter))
-	}
-
-}
 
 func errorMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,65 +24,53 @@ type singleResponse struct {
 }
 
 type Page struct {
-	Id        bson.ObjectId `bson:"_id" json:"_id"`
-	Content   string
-	IntValue  int
-	DateValue time.Time
-	ArrValue  []string
-	IdArr     []bson.ObjectId
-	IdValue   bson.ObjectId `json:",omitempty" bson:"idValue,omitempty"`
+	bongo.DocumentBase `bson:",inline"`
+	Content            string
+	IntValue           int                    `bson:"intValue"`
+	DateValue          time.Time              `bson:"dateValue"`
+	ArrValue           []string               `bson:"arrValue"`
+	IdArr              []bson.ObjectId        `bson:"idArr"`
+	IdValue            bson.ObjectId          `json:",omitempty" bson:"idValue,omitempty"`
+	RandomMap          map[string]interface{} `bson:"randomMap"`
 }
 
-var config = &bongo.Config{
-	ConnectionString: "localhost",
-	Database:         "gotest",
-}
-
-var connection, _ = bongo.Connect(config)
-var collection = connection.Collection("pages")
-
-func Factory() interface{} {
+func Factory() bongo.Document {
 	return &Page{}
 }
 
-func (s *TestSuite) TearDownSuite(c *C) {
-	connection.Session.Close()
+type HistoricalPage struct {
+	Page              `bson:",inline"`
+	traits.Historical `bson:",inline"`
+	OtherVal          string
+	diffTracker       *bongo.DiffTracker
 }
 
-type jsonEqualsChecker struct {
-	*CheckerInfo
-}
-
-func (checker *jsonEqualsChecker) Check(params []interface{}, names []string) (result bool, error string) {
-	json1, err := json.Marshal(params[0])
-	if err != nil {
-		return false, err.Error()
-	}
-	json2, err := json.Marshal(params[1])
-	if err != nil {
-		return false, err.Error()
+func (f *HistoricalPage) GetDiffTracker() *bongo.DiffTracker {
+	v := reflect.ValueOf(f.diffTracker)
+	if !v.IsValid() || v.IsNil() {
+		f.diffTracker = bongo.NewDiffTracker(f)
 	}
 
-	return string(json1) == string(json2), ""
+	return f.diffTracker
 }
 
-var JSONEquals Checker = &jsonEqualsChecker{
-	&CheckerInfo{Name: "JSONEquals", Params: []string{"obtained", "expected"}},
+func HistoricalFactory() bongo.Document {
+	return &HistoricalPage{}
 }
 
 type validatedModel struct {
-	Id      bson.ObjectId `bson:"_id",json:"_id"`
-	Content string        `json:"content"`
+	bongo.DocumentBase `bson:",inline"`
+	Content            string `json:"content"`
 }
 
-func ValidFactory() interface{} {
+func ValidFactory() bongo.Document {
 	return &validatedModel{}
 }
 
-func (v *validatedModel) Validate(collection *bongo.Collection) []string {
-	ret := []string{}
+func (v *validatedModel) Validate(collection *bongo.Collection) []error {
+	ret := []error{}
 	if !bongo.ValidateRequired(v.Content) {
-		ret = append(ret, "Content is required")
+		ret = append(ret, errors.New("Content is required"))
 	}
 
 	return ret
